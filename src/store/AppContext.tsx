@@ -5,7 +5,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createEmptyAppData, type AppData } from '../types';
-import { debouncedSave, loadAppData } from '../storage/storage';
+import { flushSave, loadAppData } from '../storage/storage';
 import { appReducer, type AppAction } from './reducer';
 
 interface AppContextValue {
@@ -19,7 +19,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, createEmptyAppData(), () => loadAppData());
 
   useEffect(() => {
-    debouncedSave(state);
+    flushSave(state);
   }, [state]);
 
   return (

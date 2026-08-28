@@ -40,21 +40,7 @@ export function clearAppData(): void {
   storage.removeItem(STORAGE_KEY);
 }
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-export function debouncedSave(data: AppData, delayMs = 300): void {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    saveAppData(data);
-    saveTimer = null;
-  }, delayMs);
-}
-
 export function flushSave(data: AppData): void {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-  }
   saveAppData(data);
 }
 

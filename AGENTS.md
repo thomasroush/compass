@@ -1,10 +1,10 @@
-# Daily Compass — Cursor Build Instructions
+# Daily Compass — Claude Code Instructions
 
 ## Goal
 
-Build **Daily Compass**, a very simple personal task-management website for one user.
+Maintain and complete the existing Daily Compass application. This is an existing working project, not a new application to rebuild.
 
-It should provide:
+Daily Compass is a simple personal task-management website for one user. It should provide:
 
 - quick task entry;
 - a basic Kanban board;
@@ -13,23 +13,29 @@ It should provide:
 - morning and evening notes;
 - data that remains after the application is closed and reopened.
 
-This is a local, non-AI first version. The finished application must not use an AI API, paid service, login system, analytics, or cloud account.
+The application must remain non-AI and must not use an AI API, paid service, login system, analytics, database, backend, or cloud data service.
 
-## How Cursor Should Work
+## How Claude Code Should Work
 
-Use Cursor Composer in autonomous/YOLO mode. Read this file, inspect the folder, and build the application from start to finish.
+Read this entire file and inspect the existing project before changing anything.
 
-- If the folder is empty, create the project.
-- Make sensible technical decisions without repeatedly asking the user.
-- Choose the simplest reliable frontend stack and data-persistence approach.
-- The model may decide whether persistence should use `localStorage`, IndexedDB, a local file, SQLite, or another free local method. Prefer the option requiring the least setup and maintenance.
-- Do not add a backend unless it clearly makes this small local application simpler.
-- Use only free, local tools and packages.
+- Maintain and improve the existing application. Do not rebuild it from scratch.
+- Preserve the existing framework, project structure, appearance, and working features unless a change is required by this file.
+- Use the existing package manager and dependencies whenever practical.
+- Use browser `localStorage` for persistence.
+- Centralize application data under one versioned storage key.
+- Preserve and migrate valid existing saved data whenever possible.
+- Save immediately after every user-created data change.
+- Validate saved and imported data before loading or replacing current data.
+- The application must remain compatible with its existing static Vercel deployment.
+- Data is specific to the browser and hostname. Ordinary Vercel redeployments on the same production hostname must not erase it.
+- Do not add a backend, database, login, AI feature, or external data service.
 - Do not deploy, publish, purchase anything, or connect outside accounts.
 - Do not delete unrelated files or use destructive Git commands.
-- Test the important functions and fix errors before finishing.
-- Keep a short `BUILD_STATUS.md` recording what is complete and the latest test results.
-- Stop when the requirements below work. Do not expand the scope.
+- Keep changes focused and avoid unnecessary dependencies.
+- Test important functions and fix errors before finishing.
+- Keep `BUILD_STATUS.md` updated with completed work and the latest test results.
+- Do not expand the project beyond the requirements in this file.
 
 ## Simplicity Rules
 

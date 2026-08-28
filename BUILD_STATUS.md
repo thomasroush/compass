@@ -14,6 +14,12 @@
 - [x] Responsive layout (sidebar + mobile nav)
 - [x] Essential Vitest tests
 - [x] README
+- [x] Immediate (non-debounced) save on every dispatched data change
+
+## Maintenance log
+
+- Reviewed the app against the updated AGENTS.md (existing-project maintenance instructions). Confirmed data model, storage/validation, and all six views already met requirements.
+- Fixed one gap: ordinary edits were persisted via a 300ms `debouncedSave`, not immediately as required. `AppContext.tsx` now calls `flushSave` (synchronous `localStorage` write) on every state change; the unused debounce timer was removed from `storage.ts`. Import/reset already used `flushSave` and were unaffected.
 
 ## Latest test results
 
@@ -28,7 +34,7 @@ Tests       9 passed (9)
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-C8v-2P84.js   264.01 kB
+dist/assets/index-BSC0oWM8.js   263.89 kB
 ```
 
 ## Lint
