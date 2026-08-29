@@ -13,7 +13,9 @@ Daily Compass is a simple personal task-management website for one user. It shou
 - morning and evening notes;
 - data that remains after the application is closed and reopened.
 
-The application must remain non-AI and must not use an AI API, paid service, login system, analytics, database, backend, or cloud data service.
+The application must remain non-AI and must not use an AI API, paid service, or analytics.
+
+Cloud data storage and sync via Supabase — including Supabase authentication, which is required for it — is a permitted, in-progress exception to the app's original local-only design (approved 2026-08-29; authentication requirement made explicit 2026-08-29). See "Cloud Sync (Supabase)" below for the full rules governing that integration, and `SUPABASE_IMPLEMENTATION_PLAN.md` for the phased build plan. No other backend, database, login system, or cloud data service may be added.
 
 ## How Claude Code Should Work
 
@@ -29,8 +31,8 @@ Read this entire file and inspect the existing project before changing anything.
 - Validate saved and imported data before loading or replacing current data.
 - The application must remain compatible with its existing static Vercel deployment.
 - Data is specific to the browser and hostname. Ordinary Vercel redeployments on the same production hostname must not erase it.
-- Do not add a backend, database, login, AI feature, or external data service.
-- Do not deploy, publish, purchase anything, or connect outside accounts.
+- Do not add an AI feature or any external service other than the approved Supabase project. Supabase authentication (individual accounts, no anonymous access) is required for cloud sync — see "Cloud Sync (Supabase)".
+- Do not deploy, publish, purchase anything, or connect outside accounts, other than the already-configured Supabase project.
 - Do not delete unrelated files or use destructive Git commands.
 - Keep changes focused and avoid unnecessary dependencies.
 - Test important functions and fix errors before finishing.
@@ -94,6 +96,25 @@ Priorities:
 - evening notes.
 
 Create stable IDs for saved records. Validate saved or imported data before replacing current data.
+
+## Cloud Sync (Supabase)
+
+Cloud storage and sync via a single, already-provisioned Supabase project is in progress, approved as an exception to the original local-only design (approved 2026-08-29; corrected 2026-08-29 — see `SUPABASE_IMPLEMENTATION_PLAN.md` for phased detail). Signed-in cloud sync is the intended architecture, supporting private cross-device access and, later, potentially additional users. These requirements are permanent, not phase-specific:
+
+- Supabase authentication is required before any cloud task data can be read or written. There is no anonymous or single-shared-account mode.
+- Each user must have an individual account and an authenticated user ID (`auth.uid()`).
+- Every cloud data record must belong to an authenticated `user_id`.
+- Row Level Security must restrict every table so a user can access only records whose `user_id` matches `auth.uid()`. No anonymous user may read, create, modify, or delete Compass data.
+- The client must use only the publishable (anon) key. Never use a secret or `service_role` key in the browser or in any client-shipped code.
+- `localStorage` remains the default and must keep working fully offline for a signed-out user — the app must never require Supabase to start, load, or save data while signed out.
+- Existing `localStorage` data must remain untouched until the user signs in and explicitly approves a one-time import. Never migrate or upload it automatically.
+- Cloud sync is the intended signed-in mode; `localStorage` may remain an offline cache and signed-out fallback, but it must never silently overwrite newer cloud data.
+- Compass remains non-AI for now.
+- Read Supabase credentials only from `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local`. Never hardcode, print, log, or commit their values.
+- Use a single reusable client (`src/lib/supabaseClient.ts`). Do not create additional client instances elsewhere.
+- Handle missing/misconfigured env vars gracefully: warn, don't crash, and fall back to local-only behavior.
+- Build sync incrementally, in the phase order defined in `SUPABASE_IMPLEMENTATION_PLAN.md`, behind feature checks (e.g. `isSupabaseConfigured`) so the app degrades cleanly without Supabase configured.
+- Keep `.env.local` git-ignored. Never display, copy, or commit its values.
 
 ## Required Application Views
 
