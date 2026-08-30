@@ -455,6 +455,12 @@ a:focus-visible {
   margin-bottom: 1rem;
 }
 
+.message.error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: var(--danger);
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;

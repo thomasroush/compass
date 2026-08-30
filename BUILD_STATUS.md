@@ -37,18 +37,38 @@ Cloud sync via Supabase is an approved, in-progress feature. The full phased pla
 
 Current status: app behavior and localStorage persistence are unchanged. No code was added or modified in this correction pass — only `AGENTS.md`, this file, and the new `SUPABASE_IMPLEMENTATION_PLAN.md`.
 
-### Phases 2–7 — not started
+### Phase 2 — Database schema and Row Level Security (applied)
 
-See `SUPABASE_IMPLEMENTATION_PLAN.md` for the full detail on each: database schema and Row Level Security (includes a proposed schema and SQL, not executed), authentication and login interface, cloud repository/synchronization layer (includes a proposed last-write-wins conflict strategy), user-confirmed localStorage migration, cross-device/security/offline/conflict testing, and Vercel environment configuration and deployment verification.
+- [x] `supabase/migrations/20260830120000_phase2_core_schema_and_rls.sql` has been executed against the Supabase project. `public.projects`, `public.tasks`, and `public.daily_notes` all exist, each with composite `(user_id, id)` primary keys, RLS enabled, and four separate owner-only policies (`select`/`insert`/`update`/`delete`, each scoped to `auth.uid() = user_id`).
+- [x] Confirmed the target Postgres version is 17.6 — well past the 15+ requirement the migration's column-specific `on delete set null (project_id)` clause depends on, so the tasks→projects foreign key applied as designed (detaches a deleted project's tasks without touching `user_id`).
+- [x] RLS inventory verified directly against the applied schema: all three tables have `rowsecurity = true` and exactly four policies each (owner-only, `to authenticated`), matching the migration file with no drift.
+- [ ] Not yet done: the manual cross-account verification pass (sign in as a second test account and confirm it cannot read/write the first account's rows, and that a signed-out request is rejected) called for in the plan's Phase 2 deliverables. No application code reads or writes these tables yet (that begins in Phase 4), so this check should happen either now via the Supabase SQL editor/API directly, or once Phase 4 adds a repository layer to exercise it end to end.
 
-**Next recommended phase:** Phase 2 — finalize and execute the database schema and Row Level Security policies in the Supabase project, then verify with a second test account that cross-account access is actually blocked before building anything on top of it.
+### Phase 3 — Authentication and login interface (complete)
+
+- [x] `src/store/AuthContext.tsx` — new `AuthProvider`/`useAuth` (via `src/store/useAuth.ts`) built on the existing `src/lib/supabaseClient.ts` (no second client created). On mount it calls `supabase.auth.getSession()` and subscribes to `supabase.auth.onAuthStateChange`, exposing `status: 'loading' | 'ready'` so the UI has a clear, distinct initial-loading state before the session check resolves. When Supabase isn't configured, `status` is `'ready'` immediately (nothing to wait for) and every action returns a clear "cloud account access is unavailable" result instead of attempting a network call.
+- [x] Exposes `signUp`, `signIn`, `signOut`, `requestPasswordReset`, `updatePassword`, and `cancelPasswordRecovery`, each returning a plain `{ ok, message }` result built from Supabase's own error/success messages (e.g. "Invalid login credentials", "Password updated.") — never a token, session object, or other technical detail.
+- [x] `src/components/AccountPanel.tsx` — the account UI embedded in Settings (`src/views/SettingsView.tsx`), consistent with the app's existing plain settings-section styling: sign in, create account, forgot password (three modes sharing one form, switched by plain-text buttons with non-colliding labels), sign out, and the signed-in email display. When Supabase isn't configured it shows an explanatory message and no forms; while the session check is loading it shows "Checking your session…".
+- [x] `src/components/PasswordRecoveryDialog.tsx` — a modal (mounted globally in `AppShell.tsx`, so it appears regardless of route) that opens automatically when Supabase fires a `PASSWORD_RECOVERY` auth event, lets the user set and confirm a new password (client-side length/match validation before calling Supabase), shows a plain success message, and only closes when the user dismisses it (Cancel, or Continue after success) — it does not auto-dismiss on a successful update, so the confirmation is always visible.
+- [x] Both `signUp` and `requestPasswordReset` pass `redirectTo`/`emailRedirectTo: window.location.origin`, so email-confirmation and password-recovery links redirect correctly on both `http://localhost:5173` and `https://compass-beige-nine.vercel.app` without any environment-specific branching — this relies on `supabase-js`'s default `detectSessionInUrl` behavior to parse the redirect and fire the corresponding auth event.
+- [x] The existing signed-out, localStorage-only app is unchanged: `AppProvider`/local task data render and function exactly as before regardless of auth `status`, and no Supabase table (`projects`, `tasks`, `daily_notes`) is read from or written to anywhere in this phase.
+- [x] Tests: `src/store/AuthContext.test.tsx`, `src/components/AccountPanel.test.tsx`, `src/components/AccountPanel.unconfigured.test.tsx`, `src/components/PasswordRecoveryDialog.test.tsx` — all mock `../lib/supabaseClient` (via `vi.mock`/`vi.hoisted`) and never contact the live Supabase project. Cover: the loading→ready transition, session state reflecting `onAuthStateChange` events, sign-in/sign-up/sign-out success and error messaging, the "Supabase not configured" fallback UI, mode switching in the account form, and the recovery dialog's validation, success, and cancel paths.
+- [x] Added `@testing-library/react` and `jsdom` as dev dependencies to support these component tests; existing tests keep running under the `node` environment (unchanged `vitest.config.ts`), the four new RTL test files opt into `jsdom` per-file via a `// @vitest-environment jsdom` pragma.
+
+**Manual testing still needed (cannot be done from this environment):** exercising the real email flows — creating an account and confirming via the actual confirmation email, and requesting/completing a password reset via the actual recovery email — on both `http://localhost:5173` and the deployed Vercel URL, to confirm Supabase's redirect handling behaves as expected outside of the mocked test environment.
+
+### Phases 4–7 — not started
+
+See `SUPABASE_IMPLEMENTATION_PLAN.md` for the full detail on each: cloud repository/synchronization layer (includes a proposed last-write-wins conflict strategy), user-confirmed localStorage migration, cross-device/security/offline/conflict testing, and Vercel environment configuration and deployment verification.
+
+**Next recommended step:** finish Phase 2's manual cross-account verification (see above), then start Phase 4 — the cloud repository/synchronization layer gated behind `isSupabaseConfigured` and an active session.
 
 ## Latest test results
 
 ```
 npm run test
-Test Files  1 passed (1)
-Tests       9 passed (9)
+Test Files  5 passed (5)
+Tests       26 passed (26)
 ```
 
 ## Latest build results
@@ -56,11 +76,11 @@ Tests       9 passed (9)
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-BSC0oWM8.js   263.89 kB
+dist/assets/index-CaxIaUZv.js   492.23 kB
 ```
 
 ## Lint
 
 ```
-npm run lint — 0 errors
+npm run lint — 0 errors (2 pre-existing warnings: react-refresh/only-export-components on AppContext.tsx and AuthContext.tsx, both context+provider files by design)
 ```

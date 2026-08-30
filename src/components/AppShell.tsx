@@ -1,4 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import { PasswordRecoveryDialog } from './PasswordRecoveryDialog';
 import { QuickAddTask } from './QuickAddTask';
 
 const NAV_ITEMS = [
@@ -52,6 +53,8 @@ export function AppShell() {
           ))}
         </nav>
       </div>
+
+      <PasswordRecoveryDialog />
     </div>
   );
 }

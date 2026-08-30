@@ -2,7 +2,7 @@
 
 This plan governs adding authenticated cloud sync to Daily Compass via Supabase. It supersedes any earlier, undocumented assumption that a personal Supabase project would not need authentication — see `AGENTS.md` → "Cloud Sync (Supabase)" for the permanent rules this plan must satisfy.
 
-Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Only Phase 1 has been implemented; this document describes Phases 2–7 without executing any SQL or writing any of their code yet.
+Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section). Phases 4–7 are still just described below, with no code written and no further SQL executed.
 
 ## Guiding constraints (apply to every phase)
 
@@ -46,15 +46,20 @@ Tables (one per Compass entity, mirroring `src/types.ts` exactly): `public.proje
 
 **Design choices carried forward as-is:** `updated_at` on every table (still anticipatory input for the Phase 4 last-write-wins strategy — the current `Task`/`Project`/`DailyNote` TypeScript types don't yet have `updatedAt` fields; Phase 4 will need to decide whether to surface them client-side or let the DB trigger be the sole source of truth). `user_id` foreign keys to `auth.users` still cascade on delete so removing a Supabase user cleans up their rows.
 
-**Deliverables for this phase (when it starts):** the migration file above reviewed and approved, then applied in the Supabase project, and a manual verification pass (as a second, unrelated test account) confirming that account A cannot read, insert, update, or delete account B's rows, and that a signed-out request is rejected.
+**Deliverables for this phase:** the migration file above reviewed, approved, and applied in the Supabase project (done — confirmed target Postgres version 17.6, well past the 15+ dependency for the tasks→projects `on delete set null (project_id)` clause). Confirmed by direct inspection that all three tables have RLS enabled and exactly four owner-only policies each, matching this file with no drift. **Still outstanding:** the manual verification pass (as a second, unrelated test account) confirming that account A cannot read, insert, update, or delete account B's rows, and that a signed-out request is rejected — not yet done, since no application code touches these tables until Phase 4. This should happen either directly (SQL editor/API, signed in as two different test accounts) or as part of exercising Phase 4's repository layer once it exists — either way, before Phase 4 is considered complete.
 
-## Phase 3 — Authentication and login interface
+## Phase 3 — Authentication and login interface (complete)
 
-- Add Supabase Auth to Compass (email/password and/or magic link — exact method to be confirmed with the user before building).
-- Individual accounts only; no anonymous or shared-account mode.
-- A minimal sign-in / sign-up / sign-out UI, consistent with the app's existing plain, non-decorative style (`AGENTS.md` → Simplicity Rules) — no social login buttons, no third-party identity branding beyond what Supabase Auth UI strictly requires.
-- Signed-out users see the existing local-only app unchanged; a sign-in entry point is added to Settings.
-- Session persistence via Supabase's client-side session handling; no custom token storage.
+- Added Supabase Auth to Compass using email/password only (the two methods enabled in the Supabase project: email/password provider, email confirmation on, new sign-ups on). No magic link, no social login.
+- Individual accounts only; no anonymous or shared-account mode. The client uses only the existing `src/lib/supabaseClient.ts` — no second client was created.
+- `src/store/AuthContext.tsx` (`AuthProvider`, consumed via `src/store/useAuth.ts`) initializes the session with `supabase.auth.getSession()` and subscribes to `supabase.auth.onAuthStateChange` on mount, exposing a `status: 'loading' | 'ready'` state so the UI has a clear initial-loading moment before the first session check resolves (immediately `'ready'`, with no spinner, when Supabase isn't configured — there's nothing to wait for).
+- `src/components/AccountPanel.tsx`, embedded in `SettingsView`, provides sign in, create account, forgot password, sign out, and the signed-in email display — one shared form switched between three modes by plain-text buttons, consistent with the app's existing plain settings-section style (`AGENTS.md` → Simplicity Rules). When Supabase isn't configured it shows an explanatory message instead of forms, so the local-only app's behavior and messaging stay honest about what's actually available.
+- `src/components/PasswordRecoveryDialog.tsx`, mounted globally in `AppShell.tsx`, opens automatically on Supabase's `PASSWORD_RECOVERY` auth event (fired after a user follows a password-recovery email link) and lets the user set a new password, with client-side validation and a persistent success message that only dismisses when the user acts (Continue/Cancel) — it does not auto-close.
+- Email-confirmation and password-recovery redirects both use `window.location.origin` (via `emailRedirectTo` on `signUp` and `redirectTo` on `resetPasswordForEmail`), which resolves correctly to `http://localhost:5173` and `https://compass-beige-nine.vercel.app` without any environment branching, relying on `supabase-js`'s default URL-based session/event detection plus the wildcard redirect URLs already configured in Supabase Authentication.
+- All error/success messaging is Supabase's own plain-language message text (e.g. "Invalid login credentials", "Password updated.") — no token, session, or other technical/credential detail is ever displayed.
+- Signed-out users see the existing local-only app completely unchanged: `AppProvider` and localStorage persistence don't depend on auth `status` in any way, and no Supabase table (`projects`, `tasks`, `daily_notes`) is read or written anywhere in this phase — sync is out of scope until Phase 4.
+- Session persistence uses Supabase's own client-side session handling (the default client configuration — `persistSession`/`autoRefreshToken`/`detectSessionInUrl` all default `true`); no custom token storage was added.
+- Tested with `src/store/AuthContext.test.tsx`, `src/components/AccountPanel.test.tsx`, `src/components/AccountPanel.unconfigured.test.tsx`, and `src/components/PasswordRecoveryDialog.test.tsx`, all against a mocked `../lib/supabaseClient` (never the live project). **Still needed:** manual end-to-end testing of the real email flows (account creation + confirmation email, password reset + recovery email) on both localhost and the deployed Vercel URL — that can't be exercised from this environment.
 
 ## Phase 4 — Cloud repository / synchronization layer
 
@@ -89,8 +94,8 @@ Tables (one per Compass entity, mirroring `src/types.ts` exactly): `public.proje
 | Phase | Status |
 |---|---|
 | 1. Supabase client connection | Complete |
-| 2. Database schema and Row Level Security | Not started (migration drafted at `supabase/migrations/20260830120000_phase2_core_schema_and_rls.sql`; no SQL executed, no cross-account verification done) |
-| 3. Authentication and login interface | Not started |
+| 2. Database schema and Row Level Security | Applied (Postgres 17.6 confirmed; RLS/policy inventory verified against all three tables). Manual cross-account verification (as a second test account) still outstanding — see Phase 2 above |
+| 3. Authentication and login interface | Complete (email/password sign-up, sign-in, sign-out, forgot-password, and recovery-redirect password reset all implemented and tested with a mocked Supabase client). Manual end-to-end testing of the real confirmation/recovery emails on localhost and Vercel still outstanding |
 | 4. Cloud repository / synchronization layer | Not started |
 | 5. User-confirmed localStorage migration | Not started |
 | 6. Cross-device, security, offline, and conflict testing | Not started |

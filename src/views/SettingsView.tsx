@@ -3,6 +3,7 @@ import { useApp } from '../store/useApp';
 import { exportJsonBackup, exportMarkdownFile, readFileAsText } from '../storage/exportImport';
 import { parseJsonAppData } from '../storage/validation';
 import { clearAppData, flushSave } from '../storage/storage';
+import { AccountPanel } from '../components/AccountPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { STORAGE_KEY } from '../types';
 
@@ -68,6 +69,8 @@ export function SettingsView() {
       </header>
 
       {message && <p className="message" role="status">{message}</p>}
+
+      <AccountPanel />
 
       <section className="section settings-section">
         <h2>Data storage</h2>
