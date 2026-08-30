@@ -26,69 +26,27 @@ Each phase below is a separate, reviewable unit of work. **Do not start a phase 
 
 Design and document (but do not execute) the schema needed for authenticated, per-user cloud storage.
 
-**Proposed schema** (Postgres, one table per Compass entity, mirroring `src/types.ts`):
+**Proposed migration:** `supabase/migrations/20260830120000_phase2_core_schema_and_rls.sql` (prepared, not executed). It supersedes the illustrative sketch that previously lived in this section — see below for what changed and why.
 
-```sql
--- Illustrative only — not executed in this phase.
+Tables (one per Compass entity, mirroring `src/types.ts` exactly): `public.projects`, `public.tasks`, `public.daily_notes` (unique on `(user_id, note_date)`). Every table has a non-null `user_id uuid references auth.users(id) on delete cascade`, RLS enabled, four separate owner-only policies (`select`/`insert`/`update`/`delete`, each `to authenticated` and keyed on `auth.uid() = user_id`, with `with check` on insert/update so `user_id` can't be reassigned), and an explicit `revoke ... from anon` plus `grant ... to authenticated` per table so anonymous access is denied at the privilege level, not only by RLS. A plain (non-`SECURITY DEFINER`) trigger function stamps `updated_at` on every update.
 
-create table public.tasks (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  title text not null,
-  notes text,
-  status text not null check (status in ('inbox','this_week','today','in_progress','waiting','done')),
-  project_id uuid references public.projects(id) on delete set null,
-  priority text not null check (priority in ('low','normal','high')),
-  due_date date,
-  is_primary boolean not null default false,
-  sort_order integer not null default 0,
-  created_at timestamptz not null default now(),
-  completed_at timestamptz,
-  updated_at timestamptz not null default now()
-);
+**Tenant isolation is structural, not just RLS.** Every table's primary key is the composite `(user_id, id)`, not `id` alone — `id` is only unique within one user's rows, so two different users' rows can never collide in, or be confused for, the same identity. `tasks.project_id` is enforced by a composite foreign key on `(user_id, project_id)` referencing `projects (user_id, id)`, so a task can only reference a project owned by that same task's `user_id`; the database rejects any attempt (however it arrives — app bug, compromised client, a future admin script) to point a task at another user's project. This was a deliberate revision after an initial draft used single-column `id` primary keys and a plain `tasks.project_id -> projects.id` foreign key, which relied entirely on RLS and application code, not the schema itself, to keep tasks and projects within one tenant.
 
-create table public.projects (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  name text not null,
-  description text,
-  status text not null check (status in ('active','completed','archived')),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+**Deletion behavior:** deleting a project must detach its tasks (`project_id` cleared) without deleting them, and without disturbing `user_id`. The migration does this with PostgreSQL 15's column-specific foreign-key action syntax, `on delete set null (project_id)`, which clears only `project_id` and leaves the rest of the row — including `user_id` — untouched. A plain (pre-15) composite `on delete set null` would null out *every* FK column, including `user_id`, which is `not null` on `tasks`; that would make a project deletion fail outright rather than detach cleanly, so it isn't used. **This is a Postgres-version dependency to confirm before ever executing the migration** — Supabase's current managed Postgres offerings are 15+, but the actual target project's version should be checked (e.g. `select version();`) rather than assumed. If it turns out to be older than 15, the fallback is to keep the composite FK for the structural ownership guarantee, drop its `on delete` action, and instead detach a project's tasks via an explicit, RLS-scoped application step (set `project_id = null` on that user's affected tasks, then delete the project) — not a database trigger that queries across tables, and not a cross-user-unsafe foreign key.
 
-create table public.daily_notes (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  note_date date not null,
-  morning_notes text,
-  evening_notes text,
-  updated_at timestamptz not null default now(),
-  unique (user_id, note_date)
-);
+**Other corrections versus the earlier illustrative sketch**, made while turning it into the actual migration:
 
--- Row Level Security: enable, then restrict every operation to the owning user.
-alter table public.tasks enable row level security;
-alter table public.projects enable row level security;
-alter table public.daily_notes enable row level security;
+- Status/priority `check` constraints now use the app's real, case-sensitive string values — `'Inbox' | 'This Week' | 'Today' | 'In Progress' | 'Waiting' | 'Done'` and `'Low' | 'Normal' | 'High'` (from `TASK_STATUSES` / `PRIORITIES` in `src/types.ts`) — not the earlier placeholder `'inbox' | 'this_week' | ...` snake_case guesses.
+- `id` columns are `text`, not `uuid`. The app's `generateId()` prefers `crypto.randomUUID()` but falls back to a non-UUID `${timestamp}-${random}` string when `crypto.randomUUID` is unavailable; a `uuid` column would reject that fallback shape and any such existing id, so preserving stable ids (a hard requirement) rules out `uuid` as the column type. `gen_random_uuid()::text` is kept only as a default for rows the database itself might originate.
+- Each table has four separate `select`/`insert`/`update`/`delete` policies instead of one combined `for all` policy, so each operation's ownership check is independently auditable.
+- Anonymous access is denied by explicit `revoke`/`grant` in addition to RLS, rather than relying solely on `auth.uid() is null` never matching `user_id`.
+- `tasks.archived` (boolean) is included — it's part of the current `Task` type and is how the app implements "archive rather than delete" — and wasn't in the earlier sketch.
+- `daily_notes` columns are `morning_notes` / `evening_notes`, both `not null default ''` (the app already treats them as always-present strings, never optional).
+- Indexes were adjusted for the composite-key design: `(user_id, id)` primary keys already provide a leading-`user_id` index on every table, so the separate single-column `user_id` indexes from the first draft were dropped as redundant; `tasks (user_id, status)` and `tasks (user_id, project_id)` remain (the latter also serves as the index on the referencing side of `tasks_project_fk`).
 
-create policy "tasks_owner_all" on public.tasks
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+**Design choices carried forward as-is:** `updated_at` on every table (still anticipatory input for the Phase 4 last-write-wins strategy — the current `Task`/`Project`/`DailyNote` TypeScript types don't yet have `updatedAt` fields; Phase 4 will need to decide whether to surface them client-side or let the DB trigger be the sole source of truth). `user_id` foreign keys to `auth.users` still cascade on delete so removing a Supabase user cleans up their rows.
 
-create policy "projects_owner_all" on public.projects
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-
-create policy "daily_notes_owner_all" on public.daily_notes
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-```
-
-Notes on the proposal:
-
-- `updated_at` on every table is required input for the Phase 4 conflict strategy (last-write-wins by timestamp — see below).
-- No default/permissive policy is created anywhere; `for all using/with check (auth.uid() = user_id)` is the only access path, which also implicitly blocks anonymous (`auth.uid() is null`) access since `null = user_id` is never true.
-- Foreign keys cascade on `auth.users` deletion so removing a Supabase user cleans up their rows.
-
-**Deliverables for this phase (when it starts):** finalized SQL migration file(s) under version control, RLS policies applied in the Supabase project, and a manual verification pass (as a second, unrelated test account) confirming that account A cannot read, insert, update, or delete account B's rows, and that a signed-out request is rejected.
+**Deliverables for this phase (when it starts):** the migration file above reviewed and approved, then applied in the Supabase project, and a manual verification pass (as a second, unrelated test account) confirming that account A cannot read, insert, update, or delete account B's rows, and that a signed-out request is rejected.
 
 ## Phase 3 — Authentication and login interface
 
@@ -131,7 +89,7 @@ Notes on the proposal:
 | Phase | Status |
 |---|---|
 | 1. Supabase client connection | Complete |
-| 2. Database schema and Row Level Security | Not started (proposed schema above; no SQL executed) |
+| 2. Database schema and Row Level Security | Not started (migration drafted at `supabase/migrations/20260830120000_phase2_core_schema_and_rls.sql`; no SQL executed, no cross-account verification done) |
 | 3. Authentication and login interface | Not started |
 | 4. Cloud repository / synchronization layer | Not started |
 | 5. User-confirmed localStorage migration | Not started |
