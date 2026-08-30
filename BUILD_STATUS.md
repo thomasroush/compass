@@ -57,18 +57,33 @@ Current status: app behavior and localStorage persistence are unchanged. No code
 
 **Manual testing still needed (cannot be done from this environment):** exercising the real email flows — creating an account and confirming via the actual confirmation email, and requesting/completing a password reset via the actual recovery email — on both `http://localhost:5173` and the deployed Vercel URL, to confirm Supabase's redirect handling behaves as expected outside of the mocked test environment.
 
-### Phases 4–7 — not started
+Production authentication confirmed working end-to-end (2026-08-30): the `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` env vars were added to the Vercel project and it was rebuilt, and account creation, email confirmation, sign-in, sign-out, and password recovery were all manually verified — both on `http://localhost:5173` and `https://compass-beige-nine.vercel.app`. (This anticipates part of Phase 7's deployment verification, done opportunistically here since Phase 3's manual testing needed it anyway — the rest of Phase 7, i.e. confirming redeployments don't affect existing data, is still pending.)
 
-See `SUPABASE_IMPLEMENTATION_PLAN.md` for the full detail on each: cloud repository/synchronization layer (includes a proposed last-write-wins conflict strategy), user-confirmed localStorage migration, cross-device/security/offline/conflict testing, and Vercel environment configuration and deployment verification.
+### Phase 4 — Cloud repository layer (repository code complete; not activated)
 
-**Next recommended step:** finish Phase 2's manual cross-account verification (see above), then start Phase 4 — the cloud repository/synchronization layer gated behind `isSupabaseConfigured` and an active session.
+Built and tested in isolation under `src/repository/`. **Deliberately not wired into `AppContext` or any view yet** — no import of anything under `src/repository/` exists anywhere else in `src/` (confirmed by search), so this phase changes no runtime behavior of the shipped app; `tsc` type-checks the new files but Vite's bundle is byte-for-byte the same size as before, confirming they're not pulled into the built app.
+
+- [x] `src/repository/types.ts` — `CloudProject`/`CloudTask`/`CloudDailyNote` (the app's own `Project`/`Task`/`DailyNote` types, unmodified, plus a cloud-only `updatedAt: string` carried through from the database's `updated_at` for later conflict handling), and a `RepositoryResult<T> = { ok: true; data: T } | { ok: false; error: RepositoryError }` result shape (`RepositoryError` has a `type: 'unconfigured' | 'unauthenticated' | 'database'` and a plain `message` — Supabase's own error text, never a token, key, or session detail).
+- [x] `src/repository/session.ts` — `getAuthenticatedSession()` is the single place that resolves `user_id`: it reads the live Supabase session via `supabase.auth.getSession()` and returns the session's own `user.id`. No repository function takes a `userId` parameter, so the UI has no way to hand in another user's id, by construction, not just convention. Returns a typed `unconfigured` error immediately (no network call) when Supabase isn't configured, and a typed `unauthenticated` error when nobody is signed in.
+- [x] `src/repository/mappers.ts` — pure, individually-tested camelCase ↔ snake_case mapping functions per entity (`projectFromRow`/`taskFromRow`/`dailyNoteFromRow` for reads; `*ToInsertRow` for creates; `*UpdatesToRow` for partial updates). Notably: `dueDate` ↔ `due_date`, `projectId` ↔ `project_id`, `isPrimary` ↔ `is_primary`, `sortOrder` ↔ `sort_order`, `completedAt` ↔ `completed_at`, `date`/`morning`/`evening` ↔ `note_date`/`morning_notes`/`evening_notes`. A deliberate mapping decision: the update mappers check `'field' in updates` rather than `updates.field !== undefined`, so that omitting an optional field (leave unchanged) is distinguishable from explicitly setting it to `undefined` (clear it to `null` in the database) — e.g. `updateTask(id, { projectId: undefined })` un-assigns a task's project, while `updateTask(id, { title: 'X' })` leaves `project_id` untouched. `!== undefined` can't tell those apart because both look identical once the key's value is read.
+- [x] `src/repository/projectsRepository.ts`, `tasksRepository.ts`, `dailyNotesRepository.ts` — `listX()`, `createX()`, `updateX(id, updates)`, `deleteX(id)` for each of the three tables. Every query explicitly filters `.eq('user_id', userId)` in addition to relying on RLS (defense in depth against an application bug, not a substitute for it), and update/delete additionally filter `.eq('id', id)` — matching the schema's composite `(user_id, id)` identity model. All reads use an explicit column list (e.g. `'id,title,notes,status,project_id,priority,due_date,created_at,completed_at,sort_order,is_primary,archived,updated_at'`), never `select('*')`. Creates preserve the app's client-generated `id` (and, for tasks, the client-set `createdAt`) rather than letting the database assign one, so a record's identity survives an eventual cloud round-trip. `updated_at` is selected and returned on every read/write/create so a later phase's last-write-wins logic has it. Tasks' `project_id` is passed through as given; the composite foreign key added in Phase 2 is what actually rejects a task pointed at another user's project — the repository doesn't duplicate that check client-side.
+- [x] Tests (all against a mocked `../lib/supabaseClient`, no live network calls): `mappers.test.ts` (12 tests, pure field-mapping including the explicit-undefined-clears-the-field cases), `session.test.ts` + `session.unconfigured.test.ts` (4 tests: authenticated / unauthenticated / database-error-from-getSession / unconfigured), `projectsRepository.test.ts` (11), `tasksRepository.test.ts` (11, including the foreign-key-violation and project-unassignment cases), `dailyNotesRepository.test.ts` (10, including the unique-`(user_id, note_date)`-violation case), and `repository.unconfigured.test.ts` (1 test covering all three `listX` functions at once). Each repository's tests cover: the authentication requirement (no session ⇒ typed error, `from()` never called), ownership-safe filters (asserting the exact `eq('user_id', …)` / `eq('id', …)` calls), empty-result lists, and database failures surfaced as typed errors instead of thrown exceptions.
+- [ ] Not done (by design, per this phase's scope): no connection to `AppContext`, no sync/merge logic, no last-write-wins conflict resolution (that's still Phase 4's *synchronization* half, deferred), and no localStorage reads, writes, or migration of any kind.
+
+**Design decisions carried forward, not yet resolved:** the proposed last-write-wins-by-`updated_at` conflict strategy from this file's Phase 4 section is still just proposed — this pass built the read/write primitives it would need (`updatedAt` on every returned record) but didn't implement the comparison/merge logic itself, since activating sync is explicitly out of scope until this repository layer is wired up. Also still open: whether `AppContext` will call this repository directly or through an intermediate sync-orchestration layer — deferred to whichever future phase actually activates it.
+
+### Phases 5–7 — not started (repository activation, migration prompt, cross-device/security/offline/conflict testing, remaining deployment verification)
+
+See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
+
+**Next recommended step:** finish Phase 2's manual cross-account verification (still outstanding), then begin the synchronization half of Phase 4 — wiring this repository layer into `AppContext` behind `isSupabaseConfigured` and an active session, plus the last-write-wins conflict logic — followed by Phase 5's user-confirmed import prompt.
 
 ## Latest test results
 
 ```
 npm run test
-Test Files  5 passed (5)
-Tests       26 passed (26)
+Test Files  12 passed (12)
+Tests       75 passed (75)
 ```
 
 ## Latest build results
@@ -76,7 +91,7 @@ Tests       26 passed (26)
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-CaxIaUZv.js   492.23 kB
+dist/assets/index-zowI7vh1.js   492.21 kB
 ```
 
 ## Lint

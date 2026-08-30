@@ -2,7 +2,7 @@
 
 This plan governs adding authenticated cloud sync to Daily Compass via Supabase. It supersedes any earlier, undocumented assumption that a personal Supabase project would not need authentication — see `AGENTS.md` → "Cloud Sync (Supabase)" for the permanent rules this plan must satisfy.
 
-Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section). Phases 4–7 are still just described below, with no code written and no further SQL executed.
+Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is now built and tested, but deliberately not activated — no application code calls it yet. Phases 5–7 are still just described below.
 
 ## Guiding constraints (apply to every phase)
 
@@ -59,14 +59,32 @@ Tables (one per Compass entity, mirroring `src/types.ts` exactly): `public.proje
 - All error/success messaging is Supabase's own plain-language message text (e.g. "Invalid login credentials", "Password updated.") — no token, session, or other technical/credential detail is ever displayed.
 - Signed-out users see the existing local-only app completely unchanged: `AppProvider` and localStorage persistence don't depend on auth `status` in any way, and no Supabase table (`projects`, `tasks`, `daily_notes`) is read or written anywhere in this phase — sync is out of scope until Phase 4.
 - Session persistence uses Supabase's own client-side session handling (the default client configuration — `persistSession`/`autoRefreshToken`/`detectSessionInUrl` all default `true`); no custom token storage was added.
-- Tested with `src/store/AuthContext.test.tsx`, `src/components/AccountPanel.test.tsx`, `src/components/AccountPanel.unconfigured.test.tsx`, and `src/components/PasswordRecoveryDialog.test.tsx`, all against a mocked `../lib/supabaseClient` (never the live project). **Still needed:** manual end-to-end testing of the real email flows (account creation + confirmation email, password reset + recovery email) on both localhost and the deployed Vercel URL — that can't be exercised from this environment.
+- Tested with `src/store/AuthContext.test.tsx`, `src/components/AccountPanel.test.tsx`, `src/components/AccountPanel.unconfigured.test.tsx`, and `src/components/PasswordRecoveryDialog.test.tsx`, all against a mocked `../lib/supabaseClient` (never the live project).
+- **Manually verified end-to-end (2026-08-30):** `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` were added to the Vercel project's environment variables and the production deployment was rebuilt; account creation, the real confirmation email, sign-in, sign-out, and password recovery via the real recovery email were all manually tested and confirmed working on both `http://localhost:5173` and `https://compass-beige-nine.vercel.app`.
 
 ## Phase 4 — Cloud repository / synchronization layer
 
-- A repository layer that mirrors the existing `src/storage` interface but reads/writes Supabase instead of (or alongside) `localStorage`, gated entirely behind `isSupabaseConfigured` and an active session.
-- **Conflict strategy (proposed):** last-write-wins by `updated_at`. On sync, a record is only overwritten if the incoming version's `updated_at` is strictly newer than the local/cloud version being replaced. Local writes always stamp a fresh `updated_at` before syncing. This is intentionally simple (no CRDT/merge) — appropriate for a single user's own devices, but must be re-examined before real multi-user sharing (as opposed to multi-user *isolation*) is ever considered.
+This phase has two halves: the repository layer itself (the typed read/write primitives), and the synchronization logic that would actually call it from the running app. **Only the first half is done.**
+
+### Repository layer (complete, inactive)
+
+- `src/repository/` — `listX()`/`createX()`/`updateX(id, updates)`/`deleteX(id)` for `projects`, `tasks`, and `daily_notes`, built directly on `src/lib/supabaseClient.ts` (no second client). Each function:
+  - resolves `user_id` itself from the live Supabase session (`src/repository/session.ts`, `getAuthenticatedSession()`) — it is never accepted as a parameter, so there is no code path where a caller can pass another user's id;
+  - filters every query by `.eq('user_id', userId)`, and update/delete additionally by `.eq('id', id)` — matching the schema's composite `(user_id, id)` primary key from Phase 2, and acting as defense-in-depth alongside (not instead of) RLS;
+  - selects an explicit column list, never `select('*')`;
+  - maps camelCase app fields to snake_case database columns and back (`src/repository/mappers.ts`), keeping the app's own `Task`/`Project`/`DailyNote` types in `src/types.ts` completely unchanged;
+  - returns a typed `RepositoryResult<T>` (`{ ok: true, data: T } | { ok: false, error: { type, message } }`) built from Supabase's own error text — never a token, key, or session detail — instead of throwing;
+  - returns the database's `updated_at` on every read/write, via a cloud-only `CloudProject`/`CloudTask`/`CloudDailyNote` type (the app type plus `updatedAt: string`), so it survives to be used by the conflict strategy below once that's implemented.
+- Tested in `src/repository/*.test.ts` (mapping, session/auth requirements, per-repository CRUD, ownership filters, empty results, database failures) — all against a mocked Supabase client, never the live project. See `BUILD_STATUS.md` for the full file/test inventory.
+- **Not connected to anything.** No file outside `src/repository/` imports it (verified by search); `AppContext`, `src/storage/`, and every view are byte-for-byte unchanged. The production Vite bundle is the same size with this phase's code present as without it, since nothing pulls it in.
+
+### Synchronization logic (not started)
+
+- Actually calling the repository from the running app, gated behind `isSupabaseConfigured` and an active session — most likely from `AppContext` or an intermediate sync layer between it and `src/repository/` (not yet decided; see "open design decisions" below).
+- **Conflict strategy (still just proposed, unimplemented):** last-write-wins by `updated_at`. On sync, a record is only overwritten if the incoming version's `updated_at` is strictly newer than the local/cloud version being replaced. Local writes always stamp a fresh `updated_at` before syncing. This is intentionally simple (no CRDT/merge) — appropriate for a single user's own devices, but must be re-examined before real multi-user sharing (as opposed to multi-user *isolation*) is ever considered.
 - Cloud sync becomes the intended behavior while signed in; `localStorage` continues to be written as an offline cache so the app keeps working if the network drops mid-session.
 - `localStorage` must never be silently overwritten by an older cloud snapshot, and vice versa — the timestamp check above governs both directions.
+- **Open design decision:** whether sync logic lives directly in `AppContext`, or in a new layer between `AppContext` and `src/repository/`. Deferred to when this half is actually built.
 
 ## Phase 5 — User-confirmed localStorage migration
 
@@ -95,8 +113,8 @@ Tables (one per Compass entity, mirroring `src/types.ts` exactly): `public.proje
 |---|---|
 | 1. Supabase client connection | Complete |
 | 2. Database schema and Row Level Security | Applied (Postgres 17.6 confirmed; RLS/policy inventory verified against all three tables). Manual cross-account verification (as a second test account) still outstanding — see Phase 2 above |
-| 3. Authentication and login interface | Complete (email/password sign-up, sign-in, sign-out, forgot-password, and recovery-redirect password reset all implemented and tested with a mocked Supabase client). Manual end-to-end testing of the real confirmation/recovery emails on localhost and Vercel still outstanding |
-| 4. Cloud repository / synchronization layer | Not started |
+| 3. Authentication and login interface | Complete, including manual end-to-end verification on localhost and production Vercel (real confirmation email, sign-in/out, real recovery email) |
+| 4. Cloud repository / synchronization layer | Repository layer (typed CRUD + mapping, tested, not activated) complete. Synchronization logic (wiring it into the app, last-write-wins conflicts) not started |
 | 5. User-confirmed localStorage migration | Not started |
 | 6. Cross-device, security, offline, and conflict testing | Not started |
-| 7. Vercel environment configuration and deployment verification | Not started |
+| 7. Vercel environment configuration and deployment verification | Env vars added and production rebuilt, redirect behavior confirmed working (done as part of Phase 3's manual verification). Confirming ordinary redeployments don't affect existing data still outstanding |
