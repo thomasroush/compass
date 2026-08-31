@@ -83,6 +83,45 @@ export async function updateDailyNote(
   return { ok: true, data: dailyNoteFromRow(data as unknown as DailyNoteRow) };
 }
 
+/**
+ * Compare-and-swap update: see updateProjectGuarded's doc comment for the
+ * full mechanism and why a single conditional UPDATE (no RPC) is sufficient.
+ * `expectedUpdatedAt` must be the exact `updatedAt` string previously read
+ * for this note (from sync metadata), never a reformatted date.
+ *
+ * Not yet called from any UI or dispatch path.
+ */
+export async function updateDailyNoteGuarded(
+  id: string,
+  updates: Partial<Pick<DailyNote, 'morning' | 'evening'>>,
+  expectedUpdatedAt: string,
+): Promise<RepositoryResult<CloudDailyNote>> {
+  const session = await getAuthenticatedSession();
+  if (!session.ok) return session;
+  const { userId, client } = session.data;
+
+  const { data, error } = await client
+    .from('daily_notes')
+    .update(dailyNoteUpdatesToRow(updates))
+    .eq('user_id', userId)
+    .eq('id', id)
+    .eq('updated_at', expectedUpdatedAt)
+    .select(DAILY_NOTE_COLUMNS)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: makeError('database', error.message) };
+  if (!data) {
+    return {
+      ok: false,
+      error: makeError(
+        'conflict',
+        'This daily note changed on the server since it was last read on this device.',
+      ),
+    };
+  }
+  return { ok: true, data: dailyNoteFromRow(data as unknown as DailyNoteRow) };
+}
+
 export async function deleteDailyNote(id: string): Promise<RepositoryResult<void>> {
   const session = await getAuthenticatedSession();
   if (!session.ok) return session;

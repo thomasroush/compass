@@ -2,7 +2,7 @@
 
 This plan governs adding authenticated cloud sync to Daily Compass via Supabase. It supersedes any earlier, undocumented assumption that a personal Supabase project would not need authentication — see `AGENTS.md` → "Cloud Sync (Supabase)" for the permanent rules this plan must satisfy.
 
-Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for one purpose — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31) — while remaining otherwise unconnected to `AppContext`. Phase 5B (two-way synchronization) and Phases 6–7 are still just described below.
+Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for one purpose — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31) — while remaining otherwise unconnected to `AppContext`. Phase 5B (two-way synchronization) is staged as 5B1–5B3 under its own approved architecture decisions; 5B1 (internal foundations only, no user-visible change) is complete, and 5B2/5B3 and Phases 6–7 are still just described below.
 
 ## Guiding constraints (apply to every phase)
 
@@ -132,12 +132,100 @@ counts, no orphaned project-task relationships, and the expected constraints in 
 project foreign key, and `daily_notes` `unique (user_id, note_date)`. See `BUILD_STATUS.md` →
 "Phase 5A" for the full detail.
 
-## Phase 5B — Two-way synchronization (not started)
+## Phase 5B — Two-way synchronization
 
-This is the "synchronization logic" half described under Phase 4 above (last-write-wins by
-`updated_at`, wiring the repository into `AppContext`) — not yet built. Phase 5A's one-time,
-upload-only migration does not require or imply this; it is a separate, larger decision to be
-made later.
+This is the "synchronization logic" half described under Phase 4 above (wiring the repository
+into `AppContext`, cloud-vs-local reconciliation) — not yet activated. Phase 5A's one-time,
+upload-only migration does not require or imply this; it is a separate, larger decision, now
+governed by the architecture decisions below and staged across three sub-phases so every commit
+stays independently deployable.
+
+**Approved architecture decisions (govern every 5B sub-phase):**
+
+1. Supabase is authoritative while authenticated.
+2. `localStorage` remains the immediate cache, offline fallback, and signed-out datastore.
+3. No `updatedAt` field is added to exported `AppData`, and the client clock is never used for
+   conflict decisions — only the database's own server-generated `updated_at` is authoritative.
+4. Each record's last-known server `updated_at` is kept in separate, device-local sync metadata,
+   never in `AppData`.
+5. Authenticated cloud updates are guarded against stale server timestamps from the first moment
+   cloud writes are activated. There is no interim unconditional-write phase deployed at any point.
+6. No Supabase Realtime or websockets — synchronization is event-driven, not subscription-based.
+7. Synchronization runs on sign-in/startup and via a manual "Sync now" action. A later
+   focus/reconnect check may be added, but is not required for 5B's initial scope.
+8. No per-record hard deletion or tombstones are added. Existing archive behavior (a field flip,
+   not a removal) remains the only "remove" gesture in the app.
+9. If cloud and local both contain data and this device has no established sync relationship with
+   that account, the app must require an explicit user choice — never guess, never auto-upload.
+10. Import stays local-only by default. A separately confirmed cloud push may add/update cloud
+    records but must never delete cloud records the imported file doesn't mention.
+11. "Clear this device" and "delete cloud data" are separate controls, built in a later sub-phase,
+    each with its own confirmation.
+12. Production must never reach a state where cloud records are hydrated into an editable UI while
+    subsequent edits remain local-only without a prominent, visible safeguard — hydration and live
+    write activation must land together from the user's perspective, not silently drift apart.
+
+### Phase 5B1 — internal synchronization foundations (complete; inactive)
+
+Internal groundwork only — no user-visible synchronization, no cloud hydration, and no automatic
+cloud writes were activated in this sub-phase. See `BUILD_STATUS.md` → "Phase 5B1" for the full
+file-by-file detail; summarized here:
+
+- Confirmed `listProjects`/`listTasks`/`listDailyNotes` (Phase 4) already serve as the typed
+  read-all operations 5B's hydration path needs; no new repository read functions were required.
+- Added `src/sync/metadata.ts` — a typed, pure schema for device-local sync bookkeeping
+  (`SyncMetadataStore` keyed by authenticated account id; each `AccountSyncMetadata` tracks
+  per-record last-known server `updated_at`, dirty ids awaiting sync, whether this device has an
+  established sync relationship with that account, and the last successful sync time). Reading is
+  always scoped through `getAccountMetadata(store, accountId)`, which returns a fresh empty record
+  rather than another account's data for any account this device hasn't seen — this is where
+  cross-account isolation is enforced, tested explicitly.
+- Added `src/sync/metadataValidation.ts` and `src/sync/metadataStorage.ts` — schema validation and
+  corruption fallback mirroring `storage/validation.ts`'s existing pattern, persisted under a new,
+  separate storage key (`daily-compass-sync-v1`) that Export, Import, and `AppData`'s own
+  load/save code never touch.
+- Added `src/sync/hydration.ts` — a pure `decideHydration()` function classifying the seven
+  startup/sign-in situations this decision governs: signed out; cloud query failed; both
+  cloud and local empty; cloud populated/local empty (safe to hydrate); cloud empty/local
+  populated (Phase 5A's existing migration prompt, never an auto-upload, per decision 9); both
+  populated with no established marker (must ask, per decision 9); both populated with an
+  established marker (ordinary sync applies). Performs no I/O and calls nothing in
+  `src/repository` — a future phase supplies the real inputs and acts on the decision.
+- Added `updateProjectGuarded`/`updateTaskGuarded`/`updateDailyNoteGuarded` to the existing
+  repository files, implementing the compare-and-swap mechanism decision 5 requires from the
+  first activated cloud write — **not called from any UI or dispatch path yet.** Each adds one
+  `.eq('updated_at', expectedUpdatedAt)` filter to the same conditional `UPDATE ...
+  .select().maybeSingle()` call already used elsewhere in the repository layer; Postgres executes
+  the filtered update as one atomic statement, so this is a real compare-and-swap requiring no
+  database RPC or SQL migration (see `BUILD_STATUS.md` → "Phase 5B1" for the full mechanism
+  analysis, including why `.maybeSingle()` rather than `.single()` is required to distinguish a
+  conflict from a genuine database error).
+- Added `'conflict'` to `RepositoryErrorType`, reusing the existing `RepositoryResult<T>` shape
+  rather than introducing a parallel result type.
+- 50 new automated tests (metadata account isolation, validation/corruption fallback, the full
+  hydration decision table, and the new guarded-update functions) — suite total 150 tests passing.
+- Confirmed unchanged: the reducer, `AppContext`'s save behavior, `MigrationPanel`, Import, Reset,
+  and the production bundle size (byte-for-byte identical, confirming `src/sync/*` is not imported
+  anywhere in the shipped app).
+
+### Phase 5B2 — Authenticated cloud writes (not started)
+
+Wires a new synchronization layer (observing `AppContext` state, not the reducer itself) that
+calls the guarded-update functions from 5B1 when signed in, using real hydration input gathered
+via `getCloudCounts()`/`countLocalData()` and fed through `decideHydration()`. Requires deciding,
+before this sub-phase starts, how the compare-and-swap's `expectedUpdatedAt` is first populated
+for a record this device has never synced (from the initial hydration read, per decision 4) and
+how a `require-explicit-choice` decision is surfaced to the user (decision 9's UI is not designed
+yet). No per-record hard deletion (decision 8) and no Realtime/websockets (decision 6) apply here
+either.
+
+### Phase 5B3 — Deletion/conflict/offline handling (not started)
+
+Covers the "Sync now" manual action (decision 7), the "Clear this device" / "delete cloud data"
+split (decision 11), the signed-in Import cloud-push option (decision 10), and reconciling a
+guarded-update conflict once 5B2's writes can actually produce one. This is also the point at
+which Phase 6 below becomes fully exercisable, since it needs real writes, conflicts, and offline
+behavior all present to test meaningfully.
 
 ## Phase 6 — Cross-device, security, offline, and conflict testing
 
@@ -163,6 +251,8 @@ made later.
 | 3. Authentication and login interface | Complete, including manual end-to-end verification on localhost and production Vercel (real confirmation email, sign-in/out, real recovery email) |
 | 4. Cloud repository / synchronization layer | Repository layer (typed CRUD + mapping, tested, plus Phase 5A's `upsertX` additions) complete and now activated (Settings → migration only). Two-way synchronization logic (wiring it into the app generally, last-write-wins conflicts) not started |
 | 5A. Controlled, explicit local-to-cloud migration | Complete, including manual verification against the production Supabase project (2026-08-31) — see `BUILD_STATUS.md` |
-| 5B. Two-way synchronization | Not started |
+| 5B1. Synchronization foundations (metadata, hydration-decision logic, guarded-update primitives) | Complete — internal only, inactive, no visible app change. See `BUILD_STATUS.md` |
+| 5B2. Authenticated cloud writes | Not started |
+| 5B3. Deletion/conflict/offline handling | Not started |
 | 6. Cross-device, security, offline, and conflict testing | Not started |
 | 7. Vercel environment configuration and deployment verification | Env vars added and production rebuilt, redirect behavior confirmed working (done as part of Phase 3's manual verification). Confirming ordinary redeployments don't affect existing data still outstanding |

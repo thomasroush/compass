@@ -14,6 +14,7 @@ import {
   deleteDailyNote,
   listDailyNotes,
   updateDailyNote,
+  updateDailyNoteGuarded,
   upsertDailyNote,
 } from './dailyNotesRepository';
 
@@ -26,6 +27,7 @@ interface MockBuilder {
   upsert: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
   single: ReturnType<typeof vi.fn>;
+  maybeSingle: ReturnType<typeof vi.fn>;
   then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
 }
 
@@ -40,6 +42,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
   builder.upsert = vi.fn(self);
   builder.delete = vi.fn(self);
   builder.single = vi.fn(self);
+  builder.maybeSingle = vi.fn(self);
   builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
   return builder;
 }
@@ -227,6 +230,60 @@ describe('updateDailyNote', () => {
     const result = await updateDailyNote('missing', { morning: 'X' });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+});
+
+describe('updateDailyNoteGuarded', () => {
+  it('applies the update when the expected updated_at still matches, filtering by user_id, id, and updated_at', async () => {
+    signIn('user-1');
+    const builder = makeBuilder({
+      data: {
+        id: 'n1',
+        note_date: '2026-08-30',
+        morning_notes: 'Plan',
+        evening_notes: 'Updated',
+        updated_at: 'ts2',
+      },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1');
+
+    expect(builder.update).toHaveBeenCalledWith({ evening_notes: 'Updated' });
+    expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
+    expect(builder.eq).toHaveBeenNthCalledWith(2, 'id', 'n1');
+    expect(builder.eq).toHaveBeenNthCalledWith(3, 'updated_at', 'ts1');
+    expect(builder.maybeSingle).toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+  });
+
+  it('reports a typed conflict, not a database error, when the row changed since it was last read', async () => {
+    signIn('user-1');
+    // maybeSingle() resolves with no error and null data when zero rows match the filter.
+    from.mockReturnValue(makeBuilder({ data: null, error: null }));
+
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'stale-timestamp');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('conflict');
+  });
+
+  it('surfaces a real database failure distinctly from a conflict', async () => {
+    signIn('user-1');
+    from.mockReturnValue(makeBuilder({ data: null, error: { message: 'permission denied' } }));
+
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('rejects without a session, and never queries the database', async () => {
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1');
+    expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
   });
 });
 

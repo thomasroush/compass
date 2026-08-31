@@ -83,6 +83,52 @@ export async function updateProject(
   return { ok: true, data: projectFromRow(data as unknown as ProjectRow) };
 }
 
+/**
+ * Compare-and-swap update: applies `updates` only if the row's current
+ * `updated_at` still equals `expectedUpdatedAt`. This is expressed as one
+ * additional `.eq('updated_at', ...)` filter on the same UPDATE statement —
+ * Postgres evaluates the WHERE clause and applies the write in a single
+ * atomic operation, so there is no separate read-then-write step on the
+ * client for another device's write to race against. See
+ * SUPABASE_IMPLEMENTATION_PLAN.md Phase 5B1 for the full analysis of why this
+ * does not require a database RPC. `expectedUpdatedAt` must be the exact
+ * `updatedAt` string previously read for this record (from sync metadata),
+ * not a reformatted or re-parsed date, so the comparison is exact.
+ *
+ * Not yet called from any UI or dispatch path — this is the guarded
+ * primitive a future phase will wire in once live cloud writes are activated.
+ */
+export async function updateProjectGuarded(
+  id: string,
+  updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>,
+  expectedUpdatedAt: string,
+): Promise<RepositoryResult<CloudProject>> {
+  const session = await getAuthenticatedSession();
+  if (!session.ok) return session;
+  const { userId, client } = session.data;
+
+  const { data, error } = await client
+    .from('projects')
+    .update(projectUpdatesToRow(updates))
+    .eq('user_id', userId)
+    .eq('id', id)
+    .eq('updated_at', expectedUpdatedAt)
+    .select(PROJECT_COLUMNS)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: makeError('database', error.message) };
+  if (!data) {
+    return {
+      ok: false,
+      error: makeError(
+        'conflict',
+        'This project changed on the server since it was last read on this device.',
+      ),
+    };
+  }
+  return { ok: true, data: projectFromRow(data as unknown as ProjectRow) };
+}
+
 export async function deleteProject(id: string): Promise<RepositoryResult<void>> {
   const session = await getAuthenticatedSession();
   if (!session.ok) return session;

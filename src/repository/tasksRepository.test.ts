@@ -9,7 +9,14 @@ vi.mock('../lib/supabaseClient', () => ({
   isSupabaseConfigured: true,
 }));
 
-import { createTask, deleteTask, listTasks, updateTask, upsertTask } from './tasksRepository';
+import {
+  createTask,
+  deleteTask,
+  listTasks,
+  updateTask,
+  updateTaskGuarded,
+  upsertTask,
+} from './tasksRepository';
 
 interface MockBuilder {
   select: ReturnType<typeof vi.fn>;
@@ -20,6 +27,7 @@ interface MockBuilder {
   upsert: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
   single: ReturnType<typeof vi.fn>;
+  maybeSingle: ReturnType<typeof vi.fn>;
   then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
 }
 
@@ -34,6 +42,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
   builder.upsert = vi.fn(self);
   builder.delete = vi.fn(self);
   builder.single = vi.fn(self);
+  builder.maybeSingle = vi.fn(self);
   builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
   return builder;
 }
@@ -291,6 +300,68 @@ describe('updateTask', () => {
     const result = await updateTask('missing', { title: 'X' });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+});
+
+describe('updateTaskGuarded', () => {
+  it('applies the update when the expected updated_at still matches, filtering by user_id, id, and updated_at', async () => {
+    signIn('user-1');
+    const builder = makeBuilder({
+      data: {
+        id: 't1',
+        title: 'Buy milk',
+        notes: null,
+        status: 'Done',
+        project_id: null,
+        priority: 'Normal',
+        due_date: null,
+        created_at: '2026-08-30T00:00:00.000Z',
+        completed_at: '2026-08-30T02:00:00.000Z',
+        sort_order: 0,
+        is_primary: false,
+        archived: false,
+        updated_at: '2026-08-30T02:00:00.000Z',
+      },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, '2026-08-30T01:00:00.000Z');
+
+    expect(builder.update).toHaveBeenCalledWith({ status: 'Done' });
+    expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
+    expect(builder.eq).toHaveBeenNthCalledWith(2, 'id', 't1');
+    expect(builder.eq).toHaveBeenNthCalledWith(3, 'updated_at', '2026-08-30T01:00:00.000Z');
+    expect(builder.maybeSingle).toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+  });
+
+  it('reports a typed conflict, not a database error, when the row changed since it was last read', async () => {
+    signIn('user-1');
+    // maybeSingle() resolves with no error and null data when zero rows match the filter.
+    from.mockReturnValue(makeBuilder({ data: null, error: null }));
+
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'stale-timestamp');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('conflict');
+  });
+
+  it('surfaces a real database failure distinctly from a conflict', async () => {
+    signIn('user-1');
+    from.mockReturnValue(makeBuilder({ data: null, error: { message: 'permission denied' } }));
+
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'ts');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('rejects without a session, and never queries the database', async () => {
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'ts');
+    expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
   });
 });
 

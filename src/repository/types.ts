@@ -9,7 +9,13 @@ export type CloudProject = Project & { updatedAt: string };
 export type CloudTask = Task & { updatedAt: string };
 export type CloudDailyNote = DailyNote & { updatedAt: string };
 
-export type RepositoryErrorType = 'unconfigured' | 'unauthenticated' | 'database';
+/**
+ * 'conflict' is returned only by a guarded (compare-and-swap) update whose
+ * expected `updated_at` no longer matches the server row — i.e. someone else
+ * (another device) wrote to it first. It is distinct from 'database', which
+ * means the query itself failed.
+ */
+export type RepositoryErrorType = 'unconfigured' | 'unauthenticated' | 'database' | 'conflict';
 
 export interface RepositoryError {
   type: RepositoryErrorType;

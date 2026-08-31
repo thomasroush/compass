@@ -76,6 +76,45 @@ export async function updateTask(
   return { ok: true, data: taskFromRow(data as unknown as TaskRow) };
 }
 
+/**
+ * Compare-and-swap update: see updateProjectGuarded's doc comment for the
+ * full mechanism and why a single conditional UPDATE (no RPC) is sufficient.
+ * `expectedUpdatedAt` must be the exact `updatedAt` string previously read
+ * for this task (from sync metadata), never a reformatted date.
+ *
+ * Not yet called from any UI or dispatch path.
+ */
+export async function updateTaskGuarded(
+  id: string,
+  updates: Partial<Omit<Task, 'id' | 'createdAt'>>,
+  expectedUpdatedAt: string,
+): Promise<RepositoryResult<CloudTask>> {
+  const session = await getAuthenticatedSession();
+  if (!session.ok) return session;
+  const { userId, client } = session.data;
+
+  const { data, error } = await client
+    .from('tasks')
+    .update(taskUpdatesToRow(updates))
+    .eq('user_id', userId)
+    .eq('id', id)
+    .eq('updated_at', expectedUpdatedAt)
+    .select(TASK_COLUMNS)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: makeError('database', error.message) };
+  if (!data) {
+    return {
+      ok: false,
+      error: makeError(
+        'conflict',
+        'This task changed on the server since it was last read on this device.',
+      ),
+    };
+  }
+  return { ok: true, data: taskFromRow(data as unknown as TaskRow) };
+}
+
 export async function deleteTask(id: string): Promise<RepositoryResult<void>> {
   const session = await getAuthenticatedSession();
   if (!session.ok) return session;
