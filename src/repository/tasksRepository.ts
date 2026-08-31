@@ -36,6 +36,26 @@ export async function createTask(task: Task): Promise<RepositoryResult<CloudTask
   return { ok: true, data: taskFromRow(data as unknown as TaskRow) };
 }
 
+/**
+ * Inserts or updates a task by its stable (user_id, id) identity. See
+ * upsertProject for why this exists (migration of existing local records with
+ * ids preserved) and its safety notes — the same apply here.
+ */
+export async function upsertTask(task: Task): Promise<RepositoryResult<CloudTask>> {
+  const session = await getAuthenticatedSession();
+  if (!session.ok) return session;
+  const { userId, client } = session.data;
+
+  const { data, error } = await client
+    .from('tasks')
+    .upsert(taskToInsertRow(userId, task), { onConflict: 'user_id,id' })
+    .select(TASK_COLUMNS)
+    .single();
+
+  if (error) return { ok: false, error: makeError('database', error.message) };
+  return { ok: true, data: taskFromRow(data as unknown as TaskRow) };
+}
+
 export async function updateTask(
   id: string,
   updates: Partial<Omit<Task, 'id' | 'createdAt'>>,

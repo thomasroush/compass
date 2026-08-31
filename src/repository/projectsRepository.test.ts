@@ -9,7 +9,13 @@ vi.mock('../lib/supabaseClient', () => ({
   isSupabaseConfigured: true,
 }));
 
-import { createProject, deleteProject, listProjects, updateProject } from './projectsRepository';
+import {
+  createProject,
+  deleteProject,
+  listProjects,
+  updateProject,
+  upsertProject,
+} from './projectsRepository';
 
 interface MockBuilder {
   select: ReturnType<typeof vi.fn>;
@@ -17,6 +23,7 @@ interface MockBuilder {
   order: ReturnType<typeof vi.fn>;
   insert: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  upsert: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
   single: ReturnType<typeof vi.fn>;
   then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
@@ -30,6 +37,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
   builder.order = vi.fn(self);
   builder.insert = vi.fn(self);
   builder.update = vi.fn(self);
+  builder.upsert = vi.fn(self);
   builder.delete = vi.fn(self);
   builder.single = vi.fn(self);
   builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
@@ -173,6 +181,42 @@ describe('updateProject', () => {
     signIn();
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'row not found' } }));
     const result = await updateProject('missing', { name: 'X' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('database');
+  });
+});
+
+describe('upsertProject', () => {
+  it('upserts by (user_id, id), preserving the given id rather than generating a new one', async () => {
+    signIn('user-1');
+    const builder = makeBuilder({
+      data: { id: 'existing-id-123', name: 'Home', description: null, status: 'active', updated_at: 'ts' },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const project: Project = { id: 'existing-id-123', name: 'Home', status: 'active' };
+    const result = await upsertProject(project);
+
+    expect(builder.upsert).toHaveBeenCalledWith(
+      { id: 'existing-id-123', user_id: 'user-1', name: 'Home', description: null, status: 'active' },
+      { onConflict: 'user_id,id' },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.id).toBe('existing-id-123');
+  });
+
+  it('rejects without a session, and never queries the database', async () => {
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const result = await upsertProject({ id: 'p1', name: 'Home', status: 'active' });
+    expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a database failure as a typed error rather than throwing', async () => {
+    signIn();
+    from.mockReturnValue(makeBuilder({ data: null, error: { message: 'constraint violation' } }));
+    const result = await upsertProject({ id: 'p1', name: 'Home', status: 'active' });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
   });

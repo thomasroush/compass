@@ -2,7 +2,7 @@
 
 This plan governs adding authenticated cloud sync to Daily Compass via Supabase. It supersedes any earlier, undocumented assumption that a personal Supabase project would not need authentication — see `AGENTS.md` → "Cloud Sync (Supabase)" for the permanent rules this plan must satisfy.
 
-Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is now built and tested, but deliberately not activated — no application code calls it yet. Phases 5–7 are still just described below.
+Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for one purpose — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31) — while remaining otherwise unconnected to `AppContext`. Phase 5B (two-way synchronization) and Phases 6–7 are still just described below.
 
 ## Guiding constraints (apply to every phase)
 
@@ -76,7 +76,7 @@ This phase has two halves: the repository layer itself (the typed read/write pri
   - returns a typed `RepositoryResult<T>` (`{ ok: true, data: T } | { ok: false, error: { type, message } }`) built from Supabase's own error text — never a token, key, or session detail — instead of throwing;
   - returns the database's `updated_at` on every read/write, via a cloud-only `CloudProject`/`CloudTask`/`CloudDailyNote` type (the app type plus `updatedAt: string`), so it survives to be used by the conflict strategy below once that's implemented.
 - Tested in `src/repository/*.test.ts` (mapping, session/auth requirements, per-repository CRUD, ownership filters, empty results, database failures) — all against a mocked Supabase client, never the live project. See `BUILD_STATUS.md` for the full file/test inventory.
-- **Not connected to anything.** No file outside `src/repository/` imports it (verified by search); `AppContext`, `src/storage/`, and every view are byte-for-byte unchanged. The production Vite bundle is the same size with this phase's code present as without it, since nothing pulls it in.
+- **Not connected to `AppContext` or general app data flow.** As of this phase, no file outside `src/repository/` imported it, and `AppContext`, `src/storage/`, and every view were byte-for-byte unchanged. Phase 5A below later added the first (and still only) caller — `src/components/MigrationPanel.tsx`, via `src/repository/migration.ts` — for the single, explicit, one-time migration action; `AppContext`, `src/storage/`, and Export/Import/Reset remain unchanged.
 
 ### Synchronization logic (not started)
 
@@ -86,11 +86,58 @@ This phase has two halves: the repository layer itself (the typed read/write pri
 - `localStorage` must never be silently overwritten by an older cloud snapshot, and vice versa — the timestamp check above governs both directions.
 - **Open design decision:** whether sync logic lives directly in `AppContext`, or in a new layer between `AppContext` and `src/repository/`. Deferred to when this half is actually built.
 
-## Phase 5 — User-confirmed localStorage migration
+## Phase 5A — Controlled, explicit local-to-cloud migration (complete)
 
-- On first sign-in on a device with existing local data, detect it and show an explicit, describable choice (e.g. "Import N tasks / M projects from this device into your account?") — never an automatic upload.
-- Import is one-time and reversible in the sense that it doesn't delete the local copy; it only pushes it to the cloud once approved.
-- Declining import leaves local data local and untouched; the user can re-trigger the prompt later from Settings.
+Built as a narrower, manual-only slice of what this section originally described: an explicit,
+Settings-initiated push of a device's existing local data to the signed-in account, with no
+automatic trigger on sign-in and no pull-down of cloud data. See `BUILD_STATUS.md` → "Phase 5A"
+for the full file-by-file detail; summarized here:
+
+- No automatic upload on sign-in — migration only starts when the user opens Settings and clicks
+  "Migrate this device's data," which itself only fetches counts (no upload yet).
+- Before any upload, the user sees the signed-in account's email, current local counts
+  (projects/tasks/daily notes), and current cloud counts for that account, plus an explicit
+  explanation that this copies device data to the cloud account and does not delete or change
+  anything locally. Only a second, explicit "Copy data to cloud" confirmation in that dialog
+  starts the upload.
+- Uses the existing repository layer's new `upsertProject`/`upsertTask`/`upsertDailyNote`
+  functions (`{ onConflict: 'user_id,id' }`, matching Phase 2's composite primary key) — existing
+  local ids are preserved, never regenerated, and a record that already exists in the cloud under
+  that id is updated in place rather than duplicated. `user_id` is still resolved only from the
+  live session, never accepted as a parameter anywhere in this flow.
+- Projects are uploaded before tasks so task → project references stay valid against the Phase 2
+  foreign key. A single record's upload failure is collected and reported, not thrown, and does
+  not stop the rest.
+- After uploading, the migration re-reads `listProjects`/`listTasks`/`listDailyNotes` and confirms
+  every uploaded record is present with matching key fields before reporting success — a
+  partial-failure or failed-verification result is always reported as such, never as success.
+- `localStorage` is never read for anything other than the upload itself, and is never cleared,
+  overwritten, or otherwise touched by this flow — Export, Import, and Reset are unchanged.
+- Declining/closing the review dialog leaves local data untouched and cloud data unmodified; the
+  user can reopen the same panel later from Settings to try again (e.g. after fixing whatever
+  caused a partial failure).
+
+**Not built in 5A, intentionally:** any automatic trigger, any pull-down of cloud data into local
+state, and any two-way sync or conflict resolution — those remain a later phase's scope (see
+Phase 5B below, folded into the original Phase 4 "synchronization" description).
+
+**Manually verified against the production Supabase project (2026-08-31):** with the Windows
+clock resynchronized and a fresh authentication session established, the migration preview
+correctly showed 4 local projects, 9 local tasks, and 3 local daily notes against 0 cloud
+projects, 0 cloud tasks, and 0 cloud daily notes; migration completed successfully; application
+verification afterward confirmed 4 projects, 9 tasks, and 3 daily notes, with local data intact
+after a refresh; and direct inspection of the production database confirmed the same record
+counts, no orphaned project-task relationships, and the expected constraints in place —
+`projects` and `tasks` and `daily_notes` each `primary key (user_id, id)`, `tasks`' composite
+project foreign key, and `daily_notes` `unique (user_id, note_date)`. See `BUILD_STATUS.md` →
+"Phase 5A" for the full detail.
+
+## Phase 5B — Two-way synchronization (not started)
+
+This is the "synchronization logic" half described under Phase 4 above (last-write-wins by
+`updated_at`, wiring the repository into `AppContext`) — not yet built. Phase 5A's one-time,
+upload-only migration does not require or imply this; it is a separate, larger decision to be
+made later.
 
 ## Phase 6 — Cross-device, security, offline, and conflict testing
 
@@ -114,7 +161,8 @@ This phase has two halves: the repository layer itself (the typed read/write pri
 | 1. Supabase client connection | Complete |
 | 2. Database schema and Row Level Security | Applied (Postgres 17.6 confirmed; RLS/policy inventory verified against all three tables). Manual cross-account verification (as a second test account) still outstanding — see Phase 2 above |
 | 3. Authentication and login interface | Complete, including manual end-to-end verification on localhost and production Vercel (real confirmation email, sign-in/out, real recovery email) |
-| 4. Cloud repository / synchronization layer | Repository layer (typed CRUD + mapping, tested, not activated) complete. Synchronization logic (wiring it into the app, last-write-wins conflicts) not started |
-| 5. User-confirmed localStorage migration | Not started |
+| 4. Cloud repository / synchronization layer | Repository layer (typed CRUD + mapping, tested, plus Phase 5A's `upsertX` additions) complete and now activated (Settings → migration only). Two-way synchronization logic (wiring it into the app generally, last-write-wins conflicts) not started |
+| 5A. Controlled, explicit local-to-cloud migration | Complete, including manual verification against the production Supabase project (2026-08-31) — see `BUILD_STATUS.md` |
+| 5B. Two-way synchronization | Not started |
 | 6. Cross-device, security, offline, and conflict testing | Not started |
 | 7. Vercel environment configuration and deployment verification | Env vars added and production rebuilt, redirect behavior confirmed working (done as part of Phase 3's manual verification). Confirming ordinary redeployments don't affect existing data still outstanding |

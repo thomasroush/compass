@@ -9,7 +9,7 @@ vi.mock('../lib/supabaseClient', () => ({
   isSupabaseConfigured: true,
 }));
 
-import { createTask, deleteTask, listTasks, updateTask } from './tasksRepository';
+import { createTask, deleteTask, listTasks, updateTask, upsertTask } from './tasksRepository';
 
 interface MockBuilder {
   select: ReturnType<typeof vi.fn>;
@@ -17,6 +17,7 @@ interface MockBuilder {
   order: ReturnType<typeof vi.fn>;
   insert: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  upsert: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
   single: ReturnType<typeof vi.fn>;
   then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
@@ -30,6 +31,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
   builder.order = vi.fn(self);
   builder.insert = vi.fn(self);
   builder.update = vi.fn(self);
+  builder.upsert = vi.fn(self);
   builder.delete = vi.fn(self);
   builder.single = vi.fn(self);
   builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
@@ -180,6 +182,58 @@ describe('createTask', () => {
       makeBuilder({ data: null, error: { message: 'violates foreign key constraint "tasks_project_fk"' } }),
     );
     const result = await createTask(sampleTask);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('database');
+  });
+});
+
+describe('upsertTask', () => {
+  it('upserts by (user_id, id), preserving the given id', async () => {
+    signIn('user-1');
+    const builder = makeBuilder({
+      data: {
+        id: 'stable-id-1',
+        title: 'Buy milk',
+        notes: null,
+        status: 'Inbox',
+        project_id: null,
+        priority: 'Normal',
+        due_date: null,
+        created_at: '2026-08-30T00:00:00.000Z',
+        completed_at: null,
+        sort_order: 0,
+        is_primary: false,
+        archived: false,
+        updated_at: 'ts',
+      },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const task: Task = { ...sampleTask, id: 'stable-id-1' };
+    const result = await upsertTask(task);
+
+    expect(builder.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'stable-id-1', user_id: 'user-1' }),
+      { onConflict: 'user_id,id' },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.id).toBe('stable-id-1');
+  });
+
+  it('rejects without a session, and never queries the database', async () => {
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const result = await upsertTask(sampleTask);
+    expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a database failure (e.g. a foreign-key violation) as a typed error', async () => {
+    signIn();
+    from.mockReturnValue(
+      makeBuilder({ data: null, error: { message: 'violates foreign key constraint' } }),
+    );
+    const result = await upsertTask(sampleTask);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
   });

@@ -4,6 +4,7 @@ import { exportJsonBackup, exportMarkdownFile, readFileAsText } from '../storage
 import { parseJsonAppData } from '../storage/validation';
 import { clearAppData, flushSave } from '../storage/storage';
 import { AccountPanel } from '../components/AccountPanel';
+import { MigrationPanel } from '../components/MigrationPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { STORAGE_KEY } from '../types';
 
@@ -71,6 +72,7 @@ export function SettingsView() {
       {message && <p className="message" role="status">{message}</p>}
 
       <AccountPanel />
+      <MigrationPanel />
 
       <section className="section settings-section">
         <h2>Data storage</h2>

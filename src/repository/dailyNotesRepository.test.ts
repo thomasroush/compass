@@ -14,6 +14,7 @@ import {
   deleteDailyNote,
   listDailyNotes,
   updateDailyNote,
+  upsertDailyNote,
 } from './dailyNotesRepository';
 
 interface MockBuilder {
@@ -22,6 +23,7 @@ interface MockBuilder {
   order: ReturnType<typeof vi.fn>;
   insert: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  upsert: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
   single: ReturnType<typeof vi.fn>;
   then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
@@ -35,6 +37,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
   builder.order = vi.fn(self);
   builder.insert = vi.fn(self);
   builder.update = vi.fn(self);
+  builder.upsert = vi.fn(self);
   builder.delete = vi.fn(self);
   builder.single = vi.fn(self);
   builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
@@ -147,6 +150,50 @@ describe('createDailyNote', () => {
       }),
     );
     const result = await createDailyNote(sampleNote);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('database');
+  });
+});
+
+describe('upsertDailyNote', () => {
+  it('upserts by (user_id, id), preserving the given id', async () => {
+    signIn('user-1');
+    const builder = makeBuilder({
+      data: {
+        id: 'stable-note-1',
+        note_date: '2026-08-30',
+        morning_notes: 'Plan',
+        evening_notes: 'Review',
+        updated_at: 'ts',
+      },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const note: DailyNote = { ...sampleNote, id: 'stable-note-1' };
+    const result = await upsertDailyNote(note);
+
+    expect(builder.upsert).toHaveBeenCalledWith(
+      { id: 'stable-note-1', user_id: 'user-1', note_date: '2026-08-30', morning_notes: 'Plan', evening_notes: 'Review' },
+      { onConflict: 'user_id,id' },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.id).toBe('stable-note-1');
+  });
+
+  it('rejects without a session, and never queries the database', async () => {
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const result = await upsertDailyNote(sampleNote);
+    expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a database failure (e.g. a colliding note_date) as a typed error', async () => {
+    signIn();
+    from.mockReturnValue(
+      makeBuilder({ data: null, error: { message: 'duplicate key value violates unique constraint "daily_notes_user_date_unique"' } }),
+    );
+    const result = await upsertDailyNote(sampleNote);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
   });

@@ -40,6 +40,29 @@ export async function createProject(project: Project): Promise<RepositoryResult<
   return { ok: true, data: projectFromRow(data as unknown as ProjectRow) };
 }
 
+/**
+ * Inserts or updates a project by its stable (user_id, id) identity — the same
+ * composite primary key Phase 2's schema defines. Used for migrating existing
+ * local records into the cloud with their ids preserved: a record that already
+ * exists (same id, same authenticated user) is updated in place rather than
+ * duplicated; a new one is inserted. Never accepts a user id from the caller —
+ * it comes only from the live session, exactly like every other function here.
+ */
+export async function upsertProject(project: Project): Promise<RepositoryResult<CloudProject>> {
+  const session = await getAuthenticatedSession();
+  if (!session.ok) return session;
+  const { userId, client } = session.data;
+
+  const { data, error } = await client
+    .from('projects')
+    .upsert(projectToInsertRow(userId, project), { onConflict: 'user_id,id' })
+    .select(PROJECT_COLUMNS)
+    .single();
+
+  if (error) return { ok: false, error: makeError('database', error.message) };
+  return { ok: true, data: projectFromRow(data as unknown as ProjectRow) };
+}
+
 export async function updateProject(
   id: string,
   updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>,

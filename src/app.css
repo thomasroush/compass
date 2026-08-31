@@ -507,6 +507,38 @@ a:focus-visible {
   gap: 0.75rem;
 }
 
+.migration-counts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.migration-counts-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.9rem;
+}
+
+.migration-counts-label {
+  font-weight: 600;
+  min-width: 12rem;
+}
+
+.migration-result {
+  margin-top: 0.75rem;
+}
+
+.migration-result ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
 code {
   font-family: Consolas, 'Courier New', monospace;
   font-size: 0.9em;
