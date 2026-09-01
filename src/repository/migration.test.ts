@@ -25,9 +25,14 @@ import { countLocalData, getCloudCounts, runMigration } from './migration';
 function ok<T>(data: T): RepositoryResult<T> {
   return { ok: true, data };
 }
-function err(type: 'unauthenticated' | 'unconfigured' | 'database', message: string): RepositoryResult<never> {
+function err(
+  type: 'unauthenticated' | 'unconfigured' | 'database' | 'account-mismatch',
+  message: string,
+): RepositoryResult<never> {
   return { ok: false, error: { type, message } };
 }
+
+const accountId = 'account-verified-by-ui-1';
 
 const project: Project = { id: 'proj-stable-1', name: 'Home', status: 'active' };
 const task: Task = {
@@ -94,7 +99,7 @@ describe('runMigration — authentication requirement', () => {
   it('does not migrate anything, and stops immediately, when not authenticated', async () => {
     projectsRepo.upsertProject.mockResolvedValue(err('unauthenticated', 'You must be signed in to access cloud data.'));
 
-    const outcome = await runMigration(localData());
+    const outcome = await runMigration(localData(), accountId);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.authError).toBe('You must be signed in to access cloud data.');
@@ -102,6 +107,49 @@ describe('runMigration — authentication requirement', () => {
     // Tasks/notes must never be attempted once authentication fails, and no
     // verification re-read happens either.
     expect(tasksRepo.upsertTask).not.toHaveBeenCalled();
+    expect(dailyNotesRepo.upsertDailyNote).not.toHaveBeenCalled();
+    expect(projectsRepo.listProjects).not.toHaveBeenCalled();
+  });
+});
+
+describe('runMigration — account-affinity pinning', () => {
+  it('passes the caller-supplied, already-authenticated account id to every upsert call — never a value derived from the records', async () => {
+    projectsRepo.upsertProject.mockResolvedValue(ok(cloudProject()));
+    tasksRepo.upsertTask.mockResolvedValue(ok(cloudTask()));
+    dailyNotesRepo.upsertDailyNote.mockResolvedValue(ok(cloudNote()));
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+
+    await runMigration(localData(), accountId);
+
+    expect(projectsRepo.upsertProject).toHaveBeenCalledWith(project, accountId);
+    expect(tasksRepo.upsertTask).toHaveBeenCalledWith(task, accountId);
+    expect(dailyNotesRepo.upsertDailyNote).toHaveBeenCalledWith(note, accountId);
+  });
+
+  it('stops immediately and reports authError, without abandoning already-uploaded records, when a later record hits an account mismatch', async () => {
+    const secondTask: Task = { ...task, id: 'task-stable-2', title: 'Second task' };
+    projectsRepo.upsertProject.mockResolvedValue(ok(cloudProject()));
+    tasksRepo.upsertTask.mockImplementation(async (t: Task) => {
+      if (t.id === 'task-stable-2') {
+        return err(
+          'account-mismatch',
+          'This operation was blocked because the signed-in account changed before it completed. No data was written.',
+        );
+      }
+      return ok(cloudTask(t));
+    });
+
+    const outcome = await runMigration(localData({ tasks: [task, secondTask] }), accountId);
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.authError).toMatch(/signed-in account changed/);
+    // The project, and the first task (uploaded before the mismatch was hit
+    // on the second task), are still reported as uploaded — this is not
+    // silently discarded — but nothing after the mismatch is attempted: no
+    // daily notes, and no verification re-read.
+    expect(outcome.uploaded).toEqual({ projects: 1, tasks: 1, dailyNotes: 0 });
     expect(dailyNotesRepo.upsertDailyNote).not.toHaveBeenCalled();
     expect(projectsRepo.listProjects).not.toHaveBeenCalled();
   });
@@ -126,12 +174,13 @@ describe('runMigration — successful migration', () => {
     tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
     dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
 
-    const outcome = await runMigration(localData());
+    const outcome = await runMigration(localData(), accountId);
 
-    // Stable IDs preserved: the repository was called with the exact same records.
-    expect(projectsRepo.upsertProject).toHaveBeenCalledWith(project);
-    expect(tasksRepo.upsertTask).toHaveBeenCalledWith(task);
-    expect(dailyNotesRepo.upsertDailyNote).toHaveBeenCalledWith(note);
+    // Stable IDs preserved: the repository was called with the exact same
+    // records, plus the caller-supplied account id.
+    expect(projectsRepo.upsertProject).toHaveBeenCalledWith(project, accountId);
+    expect(tasksRepo.upsertTask).toHaveBeenCalledWith(task, accountId);
+    expect(dailyNotesRepo.upsertDailyNote).toHaveBeenCalledWith(note, accountId);
 
     // Projects uploaded before tasks.
     expect(callOrder.indexOf('upsertProject')).toBeLessThan(callOrder.indexOf('upsertTask'));
@@ -159,7 +208,7 @@ describe('runMigration — partial failure reporting', () => {
     tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
     dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
 
-    const outcome = await runMigration(localData({ tasks: [task, secondTask] }));
+    const outcome = await runMigration(localData({ tasks: [task, secondTask] }), accountId);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.uploaded.tasks).toBe(1);
@@ -181,7 +230,7 @@ describe('runMigration — verification failure reporting', () => {
     tasksRepo.listTasks.mockResolvedValue(ok([]));
     dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
 
-    const outcome = await runMigration(localData());
+    const outcome = await runMigration(localData(), accountId);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.uploaded.tasks).toBe(1); // the upload itself reported success...
@@ -200,7 +249,7 @@ describe('runMigration — verification failure reporting', () => {
     // Re-read shows different content than what was migrated.
     dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([{ ...cloudNote(), evening: 'Something else' }]));
 
-    const outcome = await runMigration(localData());
+    const outcome = await runMigration(localData(), accountId);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.verification?.passed).toBe(false);

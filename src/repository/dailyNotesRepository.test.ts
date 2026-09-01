@@ -3,11 +3,17 @@ import type { DailyNote } from '../types';
 
 const auth = vi.hoisted(() => ({ getSession: vi.fn() }));
 const from = vi.hoisted(() => vi.fn());
+const createClientMock = vi.hoisted(() => vi.fn(() => ({ from })));
 
 vi.mock('../lib/supabaseClient', () => ({
   supabase: { auth, from },
   isSupabaseConfigured: true,
 }));
+
+vi.mock('@supabase/supabase-js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@supabase/supabase-js')>();
+  return { ...actual, createClient: createClientMock };
+});
 
 import {
   createDailyNote,
@@ -48,7 +54,10 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
 }
 
 function signIn(userId = 'user-1') {
-  auth.getSession.mockResolvedValue({ data: { session: { user: { id: userId } } }, error: null });
+  auth.getSession.mockResolvedValue({
+    data: { session: { user: { id: userId }, access_token: `token-${userId}` } },
+    error: null,
+  });
 }
 
 const sampleNote: DailyNote = { id: 'n1', date: '2026-08-30', morning: 'Plan', evening: 'Review' };
@@ -133,7 +142,7 @@ describe('createDailyNote', () => {
     });
     from.mockReturnValue(builder);
 
-    await createDailyNote(sampleNote);
+    await createDailyNote(sampleNote, 'user-1');
 
     expect(builder.insert).toHaveBeenCalledWith({
       id: 'n1',
@@ -152,9 +161,17 @@ describe('createDailyNote', () => {
         error: { message: 'duplicate key value violates unique constraint "daily_notes_user_date_unique"' },
       }),
     );
-    const result = await createDailyNote(sampleNote);
+    const result = await createDailyNote(sampleNote, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await createDailyNote(sampleNote, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -174,7 +191,7 @@ describe('upsertDailyNote', () => {
     from.mockReturnValue(builder);
 
     const note: DailyNote = { ...sampleNote, id: 'stable-note-1' };
-    const result = await upsertDailyNote(note);
+    const result = await upsertDailyNote(note, 'user-1');
 
     expect(builder.upsert).toHaveBeenCalledWith(
       { id: 'stable-note-1', user_id: 'user-1', note_date: '2026-08-30', morning_notes: 'Plan', evening_notes: 'Review' },
@@ -186,7 +203,7 @@ describe('upsertDailyNote', () => {
 
   it('rejects without a session, and never queries the database', async () => {
     auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
-    const result = await upsertDailyNote(sampleNote);
+    const result = await upsertDailyNote(sampleNote, 'user-1');
     expect(result.ok).toBe(false);
     expect(from).not.toHaveBeenCalled();
   });
@@ -196,9 +213,17 @@ describe('upsertDailyNote', () => {
     from.mockReturnValue(
       makeBuilder({ data: null, error: { message: 'duplicate key value violates unique constraint "daily_notes_user_date_unique"' } }),
     );
-    const result = await upsertDailyNote(sampleNote);
+    const result = await upsertDailyNote(sampleNote, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await upsertDailyNote(sampleNote, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -217,7 +242,7 @@ describe('updateDailyNote', () => {
     });
     from.mockReturnValue(builder);
 
-    await updateDailyNote('n1', { evening: 'Updated' });
+    await updateDailyNote('n1', { evening: 'Updated' }, 'user-1');
 
     expect(builder.update).toHaveBeenCalledWith({ evening_notes: 'Updated' });
     expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
@@ -227,9 +252,17 @@ describe('updateDailyNote', () => {
   it('surfaces a database failure as a typed error', async () => {
     signIn();
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'row not found' } }));
-    const result = await updateDailyNote('missing', { morning: 'X' });
+    const result = await updateDailyNote('missing', { morning: 'X' }, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await updateDailyNote('n1', { evening: 'Updated' }, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -248,7 +281,7 @@ describe('updateDailyNoteGuarded', () => {
     });
     from.mockReturnValue(builder);
 
-    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1');
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1', 'user-1');
 
     expect(builder.update).toHaveBeenCalledWith({ evening_notes: 'Updated' });
     expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
@@ -263,7 +296,7 @@ describe('updateDailyNoteGuarded', () => {
     // maybeSingle() resolves with no error and null data when zero rows match the filter.
     from.mockReturnValue(makeBuilder({ data: null, error: null }));
 
-    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'stale-timestamp');
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'stale-timestamp', 'user-1');
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('conflict');
@@ -273,7 +306,7 @@ describe('updateDailyNoteGuarded', () => {
     signIn('user-1');
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'permission denied' } }));
 
-    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1');
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1', 'user-1');
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
@@ -281,8 +314,16 @@ describe('updateDailyNoteGuarded', () => {
 
   it('rejects without a session, and never queries the database', async () => {
     auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
-    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1');
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1', 'user-1');
     expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await updateDailyNoteGuarded('n1', { evening: 'Updated' }, 'ts1', 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
   });
 });
@@ -293,7 +334,7 @@ describe('deleteDailyNote', () => {
     const builder = makeBuilder({ data: null, error: null });
     from.mockReturnValue(builder);
 
-    const result = await deleteDailyNote('n1');
+    const result = await deleteDailyNote('n1', 'user-1');
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
@@ -304,8 +345,16 @@ describe('deleteDailyNote', () => {
   it('surfaces a database failure as a typed error', async () => {
     signIn();
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'permission denied' } }));
-    const result = await deleteDailyNote('n1');
+    const result = await deleteDailyNote('n1', 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await deleteDailyNote('n1', 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });

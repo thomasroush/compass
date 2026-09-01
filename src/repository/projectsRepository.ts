@@ -5,7 +5,7 @@ import {
   projectUpdatesToRow,
   type ProjectRow,
 } from './mappers';
-import { getAuthenticatedSession } from './session';
+import { getAuthenticatedSession, getAuthenticatedSessionFor } from './session';
 import { makeError, type CloudProject, type RepositoryResult } from './types';
 
 const PROJECT_COLUMNS = 'id,name,description,status,updated_at';
@@ -25,8 +25,18 @@ export async function listProjects(): Promise<RepositoryResult<CloudProject[]>> 
   return { ok: true, data: (data as unknown as ProjectRow[]).map(projectFromRow) };
 }
 
-export async function createProject(project: Project): Promise<RepositoryResult<CloudProject>> {
-  const session = await getAuthenticatedSession();
+/**
+ * `expectedAccountId` is required (Phase 5B3A, task 2 of 3 — see
+ * SUPABASE_IMPLEMENTATION_PLAN.md decision 13) and is routed through
+ * `getAuthenticatedSessionFor`, which fails closed with a typed
+ * `'account-mismatch'` error, before any table access, if the live session
+ * no longer belongs to that account.
+ */
+export async function createProject(
+  project: Project,
+  expectedAccountId: string,
+): Promise<RepositoryResult<CloudProject>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -42,14 +52,26 @@ export async function createProject(project: Project): Promise<RepositoryResult<
 
 /**
  * Inserts or updates a project by its stable (user_id, id) identity — the same
- * composite primary key Phase 2's schema defines. Used for migrating existing
- * local records into the cloud with their ids preserved: a record that already
- * exists (same id, same authenticated user) is updated in place rather than
- * duplicated; a new one is inserted. Never accepts a user id from the caller —
- * it comes only from the live session, exactly like every other function here.
+ * composite primary key Phase 2's schema defines. Used by Phase 5A migration
+ * (`repository/migration.ts`) to push existing local records into the cloud
+ * with their ids preserved: a record that already exists (same id, same
+ * authenticated user) is updated in place rather than duplicated; a new one
+ * is inserted.
+ *
+ * `expectedAccountId` is required (Phase 5B3A, task 2 of 3 — see
+ * SUPABASE_IMPLEMENTATION_PLAN.md decision 13) and is routed through
+ * `getAuthenticatedSessionFor`, same as `createProject`. Migration passes the
+ * account id its own authenticated flow already established (see
+ * `migration.ts`'s `runMigration` and `MigrationPanel.tsx`), not a value read
+ * from the records being migrated — a mismatch fails closed with a typed
+ * `'account-mismatch'` error before any table access, exactly like every
+ * other mutating function here.
  */
-export async function upsertProject(project: Project): Promise<RepositoryResult<CloudProject>> {
-  const session = await getAuthenticatedSession();
+export async function upsertProject(
+  project: Project,
+  expectedAccountId: string,
+): Promise<RepositoryResult<CloudProject>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -63,11 +85,13 @@ export async function upsertProject(project: Project): Promise<RepositoryResult<
   return { ok: true, data: projectFromRow(data as unknown as ProjectRow) };
 }
 
+/** See createProject's doc comment for `expectedAccountId`'s role. */
 export async function updateProject(
   id: string,
   updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>,
+  expectedAccountId: string,
 ): Promise<RepositoryResult<CloudProject>> {
-  const session = await getAuthenticatedSession();
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -97,13 +121,15 @@ export async function updateProject(
  *
  * Not yet called from any UI or dispatch path — this is the guarded
  * primitive a future phase will wire in once live cloud writes are activated.
+ * See createProject's doc comment for `expectedAccountId`'s role.
  */
 export async function updateProjectGuarded(
   id: string,
   updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>,
   expectedUpdatedAt: string,
+  expectedAccountId: string,
 ): Promise<RepositoryResult<CloudProject>> {
-  const session = await getAuthenticatedSession();
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -129,8 +155,12 @@ export async function updateProjectGuarded(
   return { ok: true, data: projectFromRow(data as unknown as ProjectRow) };
 }
 
-export async function deleteProject(id: string): Promise<RepositoryResult<void>> {
-  const session = await getAuthenticatedSession();
+/** See createProject's doc comment for `expectedAccountId`'s role. */
+export async function deleteProject(
+  id: string,
+  expectedAccountId: string,
+): Promise<RepositoryResult<void>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 

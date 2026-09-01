@@ -3,11 +3,17 @@ import type { Task } from '../types';
 
 const auth = vi.hoisted(() => ({ getSession: vi.fn() }));
 const from = vi.hoisted(() => vi.fn());
+const createClientMock = vi.hoisted(() => vi.fn(() => ({ from })));
 
 vi.mock('../lib/supabaseClient', () => ({
   supabase: { auth, from },
   isSupabaseConfigured: true,
 }));
+
+vi.mock('@supabase/supabase-js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@supabase/supabase-js')>();
+  return { ...actual, createClient: createClientMock };
+});
 
 import {
   createTask,
@@ -48,7 +54,10 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
 }
 
 function signIn(userId = 'user-1') {
-  auth.getSession.mockResolvedValue({ data: { session: { user: { id: userId } } }, error: null });
+  auth.getSession.mockResolvedValue({
+    data: { session: { user: { id: userId }, access_token: `token-${userId}` } },
+    error: null,
+  });
 }
 
 const sampleTask: Task = {
@@ -166,7 +175,7 @@ describe('createTask', () => {
     });
     from.mockReturnValue(builder);
 
-    await createTask(sampleTask);
+    await createTask(sampleTask, 'user-1');
 
     expect(builder.insert).toHaveBeenCalledWith({
       id: 't1',
@@ -190,9 +199,17 @@ describe('createTask', () => {
     from.mockReturnValue(
       makeBuilder({ data: null, error: { message: 'violates foreign key constraint "tasks_project_fk"' } }),
     );
-    const result = await createTask(sampleTask);
+    const result = await createTask(sampleTask, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await createTask(sampleTask, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -220,7 +237,7 @@ describe('upsertTask', () => {
     from.mockReturnValue(builder);
 
     const task: Task = { ...sampleTask, id: 'stable-id-1' };
-    const result = await upsertTask(task);
+    const result = await upsertTask(task, 'user-1');
 
     expect(builder.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'stable-id-1', user_id: 'user-1' }),
@@ -232,7 +249,7 @@ describe('upsertTask', () => {
 
   it('rejects without a session, and never queries the database', async () => {
     auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
-    const result = await upsertTask(sampleTask);
+    const result = await upsertTask(sampleTask, 'user-1');
     expect(result.ok).toBe(false);
     expect(from).not.toHaveBeenCalled();
   });
@@ -242,9 +259,17 @@ describe('upsertTask', () => {
     from.mockReturnValue(
       makeBuilder({ data: null, error: { message: 'violates foreign key constraint' } }),
     );
-    const result = await upsertTask(sampleTask);
+    const result = await upsertTask(sampleTask, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await upsertTask(sampleTask, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -271,7 +296,7 @@ describe('updateTask', () => {
     });
     from.mockReturnValue(builder);
 
-    await updateTask('t1', { status: 'Done', completedAt: '2026-08-30T02:00:00.000Z' });
+    await updateTask('t1', { status: 'Done', completedAt: '2026-08-30T02:00:00.000Z' }, 'user-1');
 
     expect(builder.update).toHaveBeenCalledWith({
       status: 'Done',
@@ -289,7 +314,7 @@ describe('updateTask', () => {
     });
     from.mockReturnValue(builder);
 
-    await updateTask('t1', { projectId: undefined });
+    await updateTask('t1', { projectId: undefined }, 'user-1');
 
     expect(builder.update).toHaveBeenCalledWith({ project_id: null });
   });
@@ -297,9 +322,17 @@ describe('updateTask', () => {
   it('surfaces a database failure as a typed error', async () => {
     signIn();
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'row not found' } }));
-    const result = await updateTask('missing', { title: 'X' });
+    const result = await updateTask('missing', { title: 'X' }, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await updateTask('t1', { title: 'X' }, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -326,7 +359,12 @@ describe('updateTaskGuarded', () => {
     });
     from.mockReturnValue(builder);
 
-    const result = await updateTaskGuarded('t1', { status: 'Done' }, '2026-08-30T01:00:00.000Z');
+    const result = await updateTaskGuarded(
+      't1',
+      { status: 'Done' },
+      '2026-08-30T01:00:00.000Z',
+      'user-1',
+    );
 
     expect(builder.update).toHaveBeenCalledWith({ status: 'Done' });
     expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
@@ -341,7 +379,7 @@ describe('updateTaskGuarded', () => {
     // maybeSingle() resolves with no error and null data when zero rows match the filter.
     from.mockReturnValue(makeBuilder({ data: null, error: null }));
 
-    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'stale-timestamp');
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'stale-timestamp', 'user-1');
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('conflict');
@@ -351,7 +389,7 @@ describe('updateTaskGuarded', () => {
     signIn('user-1');
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'permission denied' } }));
 
-    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'ts');
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'ts', 'user-1');
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
@@ -359,8 +397,16 @@ describe('updateTaskGuarded', () => {
 
   it('rejects without a session, and never queries the database', async () => {
     auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
-    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'ts');
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'ts', 'user-1');
     expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'ts', 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
   });
 });
@@ -371,7 +417,7 @@ describe('deleteTask', () => {
     const builder = makeBuilder({ data: null, error: null });
     from.mockReturnValue(builder);
 
-    const result = await deleteTask('t1');
+    const result = await deleteTask('t1', 'user-1');
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
@@ -382,8 +428,16 @@ describe('deleteTask', () => {
   it('surfaces a database failure as a typed error', async () => {
     signIn();
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'permission denied' } }));
-    const result = await deleteTask('t1');
+    const result = await deleteTask('t1', 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await deleteTask('t1', 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });

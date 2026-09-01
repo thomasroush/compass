@@ -1,6 +1,6 @@
 import type { Task } from '../types';
 import { taskFromRow, taskToInsertRow, taskUpdatesToRow, type TaskRow } from './mappers';
-import { getAuthenticatedSession } from './session';
+import { getAuthenticatedSession, getAuthenticatedSessionFor } from './session';
 import { makeError, type CloudTask, type RepositoryResult } from './types';
 
 const TASK_COLUMNS =
@@ -21,8 +21,18 @@ export async function listTasks(): Promise<RepositoryResult<CloudTask[]>> {
   return { ok: true, data: (data as unknown as TaskRow[]).map(taskFromRow) };
 }
 
-export async function createTask(task: Task): Promise<RepositoryResult<CloudTask>> {
-  const session = await getAuthenticatedSession();
+/**
+ * `expectedAccountId` is required (Phase 5B3A, task 2 of 3 — see
+ * SUPABASE_IMPLEMENTATION_PLAN.md decision 13) and is routed through
+ * `getAuthenticatedSessionFor`, which fails closed with a typed
+ * `'account-mismatch'` error, before any table access, if the live session
+ * no longer belongs to that account.
+ */
+export async function createTask(
+  task: Task,
+  expectedAccountId: string,
+): Promise<RepositoryResult<CloudTask>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -38,11 +48,15 @@ export async function createTask(task: Task): Promise<RepositoryResult<CloudTask
 
 /**
  * Inserts or updates a task by its stable (user_id, id) identity. See
- * upsertProject for why this exists (migration of existing local records with
- * ids preserved) and its safety notes — the same apply here.
+ * upsertProject (projectsRepository.ts) for why this exists (migration of
+ * existing local records with ids preserved) and for `expectedAccountId`'s
+ * role — the same rationale and safety notes apply here.
  */
-export async function upsertTask(task: Task): Promise<RepositoryResult<CloudTask>> {
-  const session = await getAuthenticatedSession();
+export async function upsertTask(
+  task: Task,
+  expectedAccountId: string,
+): Promise<RepositoryResult<CloudTask>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -56,11 +70,13 @@ export async function upsertTask(task: Task): Promise<RepositoryResult<CloudTask
   return { ok: true, data: taskFromRow(data as unknown as TaskRow) };
 }
 
+/** See createTask's doc comment for `expectedAccountId`'s role. */
 export async function updateTask(
   id: string,
   updates: Partial<Omit<Task, 'id' | 'createdAt'>>,
+  expectedAccountId: string,
 ): Promise<RepositoryResult<CloudTask>> {
-  const session = await getAuthenticatedSession();
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -82,14 +98,16 @@ export async function updateTask(
  * `expectedUpdatedAt` must be the exact `updatedAt` string previously read
  * for this task (from sync metadata), never a reformatted date.
  *
- * Not yet called from any UI or dispatch path.
+ * Not yet called from any UI or dispatch path. See createTask's doc comment
+ * for `expectedAccountId`'s role.
  */
 export async function updateTaskGuarded(
   id: string,
   updates: Partial<Omit<Task, 'id' | 'createdAt'>>,
   expectedUpdatedAt: string,
+  expectedAccountId: string,
 ): Promise<RepositoryResult<CloudTask>> {
-  const session = await getAuthenticatedSession();
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -115,8 +133,12 @@ export async function updateTaskGuarded(
   return { ok: true, data: taskFromRow(data as unknown as TaskRow) };
 }
 
-export async function deleteTask(id: string): Promise<RepositoryResult<void>> {
-  const session = await getAuthenticatedSession();
+/** See createTask's doc comment for `expectedAccountId`'s role. */
+export async function deleteTask(
+  id: string,
+  expectedAccountId: string,
+): Promise<RepositoryResult<void>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 

@@ -52,6 +52,11 @@ export function MigrationPanel() {
   }
 
   const localCounts = countLocalData(state);
+  // Captured here (not read as `auth.user.id` inside confirmMigration below)
+  // so it's the exact account id this already-authenticated render verified
+  // — the same identity displayed in the confirmation dialog as "Signed in
+  // as {auth.user.email}" just above.
+  const accountId = auth.user.id;
 
   async function startCheck() {
     setCheckError('');
@@ -73,7 +78,7 @@ export function MigrationPanel() {
 
   async function confirmMigration() {
     setStep('migrating');
-    const result = await runMigration(state);
+    const result = await runMigration(state, accountId);
     setOutcome(result);
     setStep('result');
   }

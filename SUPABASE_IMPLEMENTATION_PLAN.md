@@ -306,7 +306,15 @@ so `vite build`'s bundle stays byte-for-byte identical throughout.
   Not yet called from anywhere.
 - Require `expectedAccountId` on every mutating repository function (`create*`, `update*`,
   `upsert*`, `*Guarded`, `delete*`), routed through `getAuthenticatedSessionFor`. `list*`
-  (read-only) functions are unaffected. **Not started.**
+  (read-only) functions are unaffected. **Complete** — see `BUILD_STATUS.md` → "Phase 5B3A, task 2
+  of 3" for full detail. This includes `upsertProject`/`upsertTask`/`upsertDailyNote`: an earlier
+  slice of this task deferred them because they are Phase 5A migration's only write path and
+  changing their signature meant changing `migration.ts`'s calls; that has since been done as a
+  narrow, additive change — `runMigration(local, expectedAccountId)` now takes the account id its
+  caller's already-authenticated session established (`MigrationPanel.tsx`'s `auth.user.id`, never
+  derived from the records being migrated) and passes it unchanged to every `upsertX` call.
+  Migration's sequencing, UI, eligibility checks, local-data handling, retry behavior, and
+  completion state are all otherwise unchanged. No `upsert*` exception remains.
 - Add an exhaustive `ACTION_PROVENANCE` classification of every `AppAction` type into
   `'user-edit'` (dirty-producing) or `'sync-boundary'` (`LOAD`, `IMPORT`, `RESET`, and a new
   `APPLY_REMOTE_UPDATE` for pulled-down reconciliation), checked with a compile-time
@@ -387,7 +395,7 @@ to test meaningfully.
 | 5A. Controlled, explicit local-to-cloud migration | Complete, including manual verification against the production Supabase project (2026-08-31) — see `BUILD_STATUS.md` |
 | 5B1. Synchronization foundations (metadata, hydration-decision logic, guarded-update primitives) | Complete — internal only, inactive, no visible app change. See `BUILD_STATUS.md` |
 | 5B2. Signed-in cloud hydration | Complete — read-only; no cloud write activated. First activation of `src/sync/` in the shipped app. Manual verification against the production project still outstanding — see `BUILD_STATUS.md`. A follow-up fix (commit `bf7d967`) closed a related gap at the reducer level — see `BUILD_STATUS.md` → "Phase 5B2 correction" |
-| 5B3A. Account-affinity + mutation-provenance foundations | In progress — `getAuthenticatedSessionFor` account-affinity primitive complete and inert (zero callers, bundle byte-for-byte unchanged); requiring `expectedAccountId` on mutating repository functions, `ACTION_PROVENANCE` dirty-marking, and the sync-engine scaffold not yet started — see `BUILD_STATUS.md` |
+| 5B3A. Account-affinity + mutation-provenance foundations | In progress — `getAuthenticatedSessionFor` account-affinity primitive complete; `expectedAccountId` now required on every mutating repository function including `upsert*` (task 2 of 3 fully complete, no exception remaining) — `create*`/`update*`/`*Guarded`/`delete*` still have zero application callers, but `upsert*` now does via Phase 5A's migration, so the bundle grew slightly (510.13 kB → 510.78 kB) for the first time in this phase; `ACTION_PROVENANCE` dirty-marking and the sync-engine scaffold not yet started — see `BUILD_STATUS.md` |
 | 5B3B. Manual "Sync now" write-back | Not started |
 | 5B3C. Interactive linking UI + signed-in Import cloud-push | Not started |
 | 6. Cross-device, security, offline, and conflict testing | Not started |

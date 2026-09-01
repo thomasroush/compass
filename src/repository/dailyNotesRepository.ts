@@ -5,7 +5,7 @@ import {
   dailyNoteUpdatesToRow,
   type DailyNoteRow,
 } from './mappers';
-import { getAuthenticatedSession } from './session';
+import { getAuthenticatedSession, getAuthenticatedSessionFor } from './session';
 import { makeError, type CloudDailyNote, type RepositoryResult } from './types';
 
 const DAILY_NOTE_COLUMNS = 'id,note_date,morning_notes,evening_notes,updated_at';
@@ -25,8 +25,18 @@ export async function listDailyNotes(): Promise<RepositoryResult<CloudDailyNote[
   return { ok: true, data: (data as unknown as DailyNoteRow[]).map(dailyNoteFromRow) };
 }
 
-export async function createDailyNote(note: DailyNote): Promise<RepositoryResult<CloudDailyNote>> {
-  const session = await getAuthenticatedSession();
+/**
+ * `expectedAccountId` is required (Phase 5B3A, task 2 of 3 — see
+ * SUPABASE_IMPLEMENTATION_PLAN.md decision 13) and is routed through
+ * `getAuthenticatedSessionFor`, which fails closed with a typed
+ * `'account-mismatch'` error, before any table access, if the live session
+ * no longer belongs to that account.
+ */
+export async function createDailyNote(
+  note: DailyNote,
+  expectedAccountId: string,
+): Promise<RepositoryResult<CloudDailyNote>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -47,9 +57,15 @@ export async function createDailyNote(note: DailyNote): Promise<RepositoryResult
  * local note's date collides with a different existing cloud note id, this
  * call fails with a database error (reported per-record by the migration
  * caller) rather than silently overwriting the other record.
+ *
+ * See upsertProject (projectsRepository.ts) for `expectedAccountId`'s role —
+ * the same rationale and safety notes apply here.
  */
-export async function upsertDailyNote(note: DailyNote): Promise<RepositoryResult<CloudDailyNote>> {
-  const session = await getAuthenticatedSession();
+export async function upsertDailyNote(
+  note: DailyNote,
+  expectedAccountId: string,
+): Promise<RepositoryResult<CloudDailyNote>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -63,11 +79,13 @@ export async function upsertDailyNote(note: DailyNote): Promise<RepositoryResult
   return { ok: true, data: dailyNoteFromRow(data as unknown as DailyNoteRow) };
 }
 
+/** See createDailyNote's doc comment for `expectedAccountId`'s role. */
 export async function updateDailyNote(
   id: string,
   updates: Partial<Pick<DailyNote, 'morning' | 'evening'>>,
+  expectedAccountId: string,
 ): Promise<RepositoryResult<CloudDailyNote>> {
-  const session = await getAuthenticatedSession();
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -89,14 +107,16 @@ export async function updateDailyNote(
  * `expectedUpdatedAt` must be the exact `updatedAt` string previously read
  * for this note (from sync metadata), never a reformatted date.
  *
- * Not yet called from any UI or dispatch path.
+ * Not yet called from any UI or dispatch path. See createDailyNote's doc
+ * comment for `expectedAccountId`'s role.
  */
 export async function updateDailyNoteGuarded(
   id: string,
   updates: Partial<Pick<DailyNote, 'morning' | 'evening'>>,
   expectedUpdatedAt: string,
+  expectedAccountId: string,
 ): Promise<RepositoryResult<CloudDailyNote>> {
-  const session = await getAuthenticatedSession();
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 
@@ -122,8 +142,12 @@ export async function updateDailyNoteGuarded(
   return { ok: true, data: dailyNoteFromRow(data as unknown as DailyNoteRow) };
 }
 
-export async function deleteDailyNote(id: string): Promise<RepositoryResult<void>> {
-  const session = await getAuthenticatedSession();
+/** See createDailyNote's doc comment for `expectedAccountId`'s role. */
+export async function deleteDailyNote(
+  id: string,
+  expectedAccountId: string,
+): Promise<RepositoryResult<void>> {
+  const session = await getAuthenticatedSessionFor(expectedAccountId);
   if (!session.ok) return session;
   const { userId, client } = session.data;
 

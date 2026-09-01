@@ -10,9 +10,21 @@ import type { RepositoryResult } from './types';
  *
  * This module only ever pushes local data to the cloud; it never reads a
  * cloud record back into local state, deletes anything, or runs on its own.
- * Every exported function here derives the acting user solely from the live
- * Supabase session (via the repository functions it calls) — none of them
- * accept a user id as a parameter.
+ *
+ * `runMigration` takes `expectedAccountId` — the account id the calling UI's
+ * already-authenticated session established (see `MigrationPanel.tsx`, which
+ * only renders the migrate action once `useAuth()` reports a signed-in
+ * `user`, and passes that same `user.id` through unchanged). It is never
+ * derived from the local records being migrated, and it is never used to
+ * select or authorize an account: it is passed straight to every repository
+ * `upsertX` call (Phase 5B3A, task 2 of 3 — see
+ * SUPABASE_IMPLEMENTATION_PLAN.md decision 13), which independently
+ * re-verifies it against the live Supabase session on every call and fails
+ * closed with a typed `'account-mismatch'` error — without writing anything
+ * — if the session no longer matches. This closes the gap where a
+ * long-running, multi-record migration could otherwise have its later writes
+ * silently attributed to a different account if the session changed
+ * mid-migration.
  */
 
 export interface MigrationCounts {
@@ -105,8 +117,14 @@ export interface MigrationOutcome {
  *    and reported, never silently swallowed;
  *  - local data is never read from here except to upload it — nothing is
  *    deleted, cleared, or overwritten locally.
+ *
+ * `expectedAccountId` — see this module's top-level doc comment — is passed
+ * unchanged to every `upsertX` call below.
  */
-export async function runMigration(local: AppData): Promise<MigrationOutcome> {
+export async function runMigration(
+  local: AppData,
+  expectedAccountId: string,
+): Promise<MigrationOutcome> {
   const attempted = countLocalData(local);
 
   const uploaded = zeroCounts();
@@ -117,13 +135,20 @@ export async function runMigration(local: AppData): Promise<MigrationOutcome> {
 
   // Projects first, so tasks referencing them can be validated by the
   // database's foreign key once they're uploaded.
+  // A caller-supplied expectedAccountId that turns out not to match the live
+  // session is reported the same way as "not authenticated at all" — the
+  // migration stops immediately, rather than continuing to write records
+  // under a session that no longer matches the account the caller verified.
+  const isAuthFailure = (type: string) =>
+    type === 'unauthenticated' || type === 'unconfigured' || type === 'account-mismatch';
+
   for (const project of local.projects) {
-    const result = await upsertProject(project);
+    const result = await upsertProject(project, expectedAccountId);
     if (result.ok) {
       uploaded.projects += 1;
       migratedProjectIds.add(project.id);
     } else {
-      if (result.error.type === 'unauthenticated' || result.error.type === 'unconfigured') {
+      if (isAuthFailure(result.error.type)) {
         return {
           ok: false,
           attempted,
@@ -143,12 +168,12 @@ export async function runMigration(local: AppData): Promise<MigrationOutcome> {
   }
 
   for (const task of local.tasks) {
-    const result = await upsertTask(task);
+    const result = await upsertTask(task, expectedAccountId);
     if (result.ok) {
       uploaded.tasks += 1;
       migratedTaskIds.add(task.id);
     } else {
-      if (result.error.type === 'unauthenticated' || result.error.type === 'unconfigured') {
+      if (isAuthFailure(result.error.type)) {
         return {
           ok: false,
           attempted,
@@ -168,12 +193,12 @@ export async function runMigration(local: AppData): Promise<MigrationOutcome> {
   }
 
   for (const note of local.dailyNotes) {
-    const result = await upsertDailyNote(note);
+    const result = await upsertDailyNote(note, expectedAccountId);
     if (result.ok) {
       uploaded.dailyNotes += 1;
       migratedNoteIds.add(note.id);
     } else {
-      if (result.error.type === 'unauthenticated' || result.error.type === 'unconfigured') {
+      if (isAuthFailure(result.error.type)) {
         return {
           ok: false,
           attempted,

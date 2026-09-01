@@ -3,11 +3,17 @@ import type { Project } from '../types';
 
 const auth = vi.hoisted(() => ({ getSession: vi.fn() }));
 const from = vi.hoisted(() => vi.fn());
+const createClientMock = vi.hoisted(() => vi.fn(() => ({ from })));
 
 vi.mock('../lib/supabaseClient', () => ({
   supabase: { auth, from },
   isSupabaseConfigured: true,
 }));
+
+vi.mock('@supabase/supabase-js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@supabase/supabase-js')>();
+  return { ...actual, createClient: createClientMock };
+});
 
 import {
   createProject,
@@ -48,7 +54,10 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
 }
 
 function signIn(userId = 'user-1') {
-  auth.getSession.mockResolvedValue({ data: { session: { user: { id: userId } } }, error: null });
+  auth.getSession.mockResolvedValue({
+    data: { session: { user: { id: userId }, access_token: `token-${userId}` } },
+    error: null,
+  });
 }
 
 beforeEach(() => {
@@ -66,7 +75,7 @@ describe('projectsRepository authentication requirement', () => {
 
   it('rejects createProject without a session, and never queries the database', async () => {
     auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
-    const result = await createProject({ id: 'p1', name: 'Home', status: 'active' });
+    const result = await createProject({ id: 'p1', name: 'Home', status: 'active' }, 'user-1');
     expect(result.ok).toBe(false);
     expect(from).not.toHaveBeenCalled();
   });
@@ -137,7 +146,7 @@ describe('createProject', () => {
     from.mockReturnValue(builder);
 
     const project: Project = { id: 'p1', name: 'Home', description: 'desc', status: 'active' };
-    const result = await createProject(project);
+    const result = await createProject(project, 'user-1');
 
     expect(builder.insert).toHaveBeenCalledWith({
       id: 'p1',
@@ -157,9 +166,17 @@ describe('createProject', () => {
     from.mockReturnValue(
       makeBuilder({ data: null, error: { message: 'duplicate key value violates unique constraint' } }),
     );
-    const result = await createProject({ id: 'p1', name: 'Home', status: 'active' });
+    const result = await createProject({ id: 'p1', name: 'Home', status: 'active' }, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await createProject({ id: 'p1', name: 'Home', status: 'active' }, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -172,7 +189,7 @@ describe('updateProject', () => {
     });
     from.mockReturnValue(builder);
 
-    const result = await updateProject('p1', { name: 'Renamed' });
+    const result = await updateProject('p1', { name: 'Renamed' }, 'user-1');
 
     expect(builder.update).toHaveBeenCalledWith({ name: 'Renamed' });
     expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
@@ -183,9 +200,17 @@ describe('updateProject', () => {
   it('surfaces a database failure as a typed error', async () => {
     signIn();
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'row not found' } }));
-    const result = await updateProject('missing', { name: 'X' });
+    const result = await updateProject('missing', { name: 'X' }, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await updateProject('p1', { name: 'Renamed' }, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -199,7 +224,7 @@ describe('upsertProject', () => {
     from.mockReturnValue(builder);
 
     const project: Project = { id: 'existing-id-123', name: 'Home', status: 'active' };
-    const result = await upsertProject(project);
+    const result = await upsertProject(project, 'user-1');
 
     expect(builder.upsert).toHaveBeenCalledWith(
       { id: 'existing-id-123', user_id: 'user-1', name: 'Home', description: null, status: 'active' },
@@ -211,7 +236,7 @@ describe('upsertProject', () => {
 
   it('rejects without a session, and never queries the database', async () => {
     auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
-    const result = await upsertProject({ id: 'p1', name: 'Home', status: 'active' });
+    const result = await upsertProject({ id: 'p1', name: 'Home', status: 'active' }, 'user-1');
     expect(result.ok).toBe(false);
     expect(from).not.toHaveBeenCalled();
   });
@@ -219,9 +244,17 @@ describe('upsertProject', () => {
   it('surfaces a database failure as a typed error rather than throwing', async () => {
     signIn();
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'constraint violation' } }));
-    const result = await upsertProject({ id: 'p1', name: 'Home', status: 'active' });
+    const result = await upsertProject({ id: 'p1', name: 'Home', status: 'active' }, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await upsertProject({ id: 'p1', name: 'Home', status: 'active' }, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -234,7 +267,7 @@ describe('updateProjectGuarded', () => {
     });
     from.mockReturnValue(builder);
 
-    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'ts1');
+    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'ts1', 'user-1');
 
     expect(builder.update).toHaveBeenCalledWith({ name: 'Renamed' });
     expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
@@ -249,7 +282,7 @@ describe('updateProjectGuarded', () => {
     // maybeSingle() resolves with no error and null data when zero rows match the filter.
     from.mockReturnValue(makeBuilder({ data: null, error: null }));
 
-    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'stale-timestamp');
+    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'stale-timestamp', 'user-1');
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('conflict');
@@ -259,7 +292,7 @@ describe('updateProjectGuarded', () => {
     signIn('user-1');
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'permission denied' } }));
 
-    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'ts1');
+    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'ts1', 'user-1');
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
@@ -267,8 +300,16 @@ describe('updateProjectGuarded', () => {
 
   it('rejects without a session, and never queries the database', async () => {
     auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
-    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'ts1');
+    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'ts1', 'user-1');
     expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'ts1', 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
   });
 });
@@ -279,7 +320,7 @@ describe('deleteProject', () => {
     const builder = makeBuilder({ data: null, error: null });
     from.mockReturnValue(builder);
 
-    const result = await deleteProject('p1');
+    const result = await deleteProject('p1', 'user-1');
 
     expect(builder.delete).toHaveBeenCalled();
     expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
@@ -290,8 +331,16 @@ describe('deleteProject', () => {
   it('surfaces a database failure as a typed error', async () => {
     signIn();
     from.mockReturnValue(makeBuilder({ data: null, error: { message: 'permission denied' } }));
-    const result = await deleteProject('p1');
+    const result = await deleteProject('p1', 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
+    signIn('user-2');
+    const result = await deleteProject('p1', 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });

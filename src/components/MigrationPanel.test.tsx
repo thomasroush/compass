@@ -10,7 +10,7 @@ const appState = vi.hoisted(() => ({
 }));
 const authState = vi.hoisted(() => ({
   isSupabaseConfigured: true,
-  user: null as { email: string } | null,
+  user: null as { id: string; email: string } | null,
 }));
 const migration = vi.hoisted(() => ({
   countLocalData: vi.fn(),
@@ -85,7 +85,7 @@ describe('MigrationPanel — no migration without authentication', () => {
 
 describe('MigrationPanel — no migration without explicit confirmation', () => {
   it('does not call runMigration just from opening the review step', async () => {
-    authState.user = { email: 'person@example.com' };
+    authState.user = { id: 'account-1', email: 'person@example.com' };
     migration.getCloudCounts.mockResolvedValue({
       ok: true,
       data: { projects: 0, tasks: 0, dailyNotes: 0 },
@@ -103,7 +103,7 @@ describe('MigrationPanel — no migration without explicit confirmation', () => 
   });
 
   it('only calls runMigration after the explicit "Copy data to cloud" confirmation', async () => {
-    authState.user = { email: 'person@example.com' };
+    authState.user = { id: 'account-1', email: 'person@example.com' };
     migration.getCloudCounts.mockResolvedValue({
       ok: true,
       data: { projects: 2, tasks: 3, dailyNotes: 1 },
@@ -128,14 +128,16 @@ describe('MigrationPanel — no migration without explicit confirmation', () => 
     fireEvent.click(screen.getByRole('button', { name: /Copy data to cloud/i }));
 
     await waitFor(() => expect(migration.runMigration).toHaveBeenCalledTimes(1));
-    expect(migration.runMigration).toHaveBeenCalledWith(appState.current);
+    // The account id passed is the one this already-authenticated render
+    // established (`auth.user.id`), never anything derived from local data.
+    expect(migration.runMigration).toHaveBeenCalledWith(appState.current, 'account-1');
     await waitFor(() => expect(screen.getByText(/Migration complete and verified/i)).toBeTruthy());
   });
 });
 
 describe('MigrationPanel — reporting outcomes', () => {
   async function openAndConfirm() {
-    authState.user = { email: 'person@example.com' };
+    authState.user = { id: 'account-1', email: 'person@example.com' };
     migration.getCloudCounts.mockResolvedValue({
       ok: true,
       data: { projects: 0, tasks: 0, dailyNotes: 0 },
@@ -210,7 +212,7 @@ describe('MigrationPanel — reporting outcomes', () => {
 
 describe('MigrationPanel — local data retained', () => {
   it('never dispatches a local data change, even after a successful migration', async () => {
-    authState.user = { email: 'person@example.com' };
+    authState.user = { id: 'account-1', email: 'person@example.com' };
     migration.getCloudCounts.mockResolvedValue({
       ok: true,
       data: { projects: 0, tasks: 0, dailyNotes: 0 },

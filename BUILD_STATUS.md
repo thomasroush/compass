@@ -301,34 +301,105 @@ later phase wires it in.
   `markDirty` wiring or `ACTION_PROVENANCE` table; no sync-engine drain loop or generation/
   cancellation scaffold; no linking UI; no cloud write of any kind beyond what already exists.
 
+#### Phase 5B3A, task 2 of 3 — `expectedAccountId` required on mutating repository functions (complete)
+
+`create*`/`update*`/`*Guarded`/`delete*` remain inert (zero application callers, as before).
+`upsert*` is the one exception: it now has a real caller through Phase 5A's existing, already-
+activated migration path — see the bundle-size note below. No other cloud-write path was
+activated; migration's own behavior is unchanged, only *which account identity it pins to* is new.
+
+- [x] `src/repository/projectsRepository.ts`, `tasksRepository.ts`, `dailyNotesRepository.ts` —
+  `createX`, `updateX`, `updateXGuarded`, and `deleteX` now each take a required
+  `expectedAccountId: string` parameter and resolve their session via
+  `getAuthenticatedSessionFor(expectedAccountId)` instead of `getAuthenticatedSession()`. A
+  mismatch between `expectedAccountId` and the live session now returns a typed
+  `'account-mismatch'` error before any table access is attempted, for every one of these
+  functions — fulfilling this session's fail-closed requirement for account identity.
+- [x] `list*` functions are unchanged (read-only, per the plan's own scoping) and still use
+  `getAuthenticatedSession()`.
+- [x] **`upsertProject`/`upsertTask`/`upsertDailyNote` are now scoped too** — the earlier revision
+  of this section excluded them because they are Phase 5A migration's only write path
+  (`src/repository/migration.ts`), called synchronously within one user action, and changing their
+  signature meant changing `migration.ts`'s calls. That exclusion has been closed: all three now
+  require `expectedAccountId` and route through `getAuthenticatedSessionFor`, exactly like every
+  other mutating function in this task. **No `upsert*` exception remains for Phase 5B3A task 2.**
+- [x] `src/repository/migration.ts` — `runMigration(local, expectedAccountId)` now takes the
+  account id as a required second parameter and passes it unchanged to every `upsertProject`/
+  `upsertTask`/`upsertDailyNote` call. This is **not** re-derived from a fresh
+  `getAuthenticatedSession()` call inside `migration.ts`, and **not** read from any field on the
+  records being migrated — it is the exact account id the calling UI's own already-authenticated
+  render established. The existing "stop immediately, don't touch the rest" behavior for
+  `'unauthenticated'`/`'unconfigured'` upsert failures now also covers `'account-mismatch'`: if the
+  live session no longer matches `expectedAccountId` partway through a multi-record migration (a
+  sign-out/different sign-in racing the upload loop), the affected write never happens, migration
+  stops there with `authError` set, and no verification re-read is attempted — matching the
+  existing philosophy for every other auth-type failure, never a partial silent success.
+- [x] `src/components/MigrationPanel.tsx` — the sole caller of `runMigration`, updated to pass
+  `auth.user.id` (captured into a local `accountId` right after the panel's existing
+  `if (!auth.user) return …` guard, so it's available inside the `confirmMigration` closure). This
+  is the same identity the panel already displays and the user already confirmed against
+  ("Signed in as {auth.user.email}") before this point — not a new lookup, not a value taken from
+  local data. No other line in `MigrationPanel.tsx` changed: same steps (`idle` → `checking` →
+  `confirming` → `migrating` → `result`), same eligibility gate, same dialog copy, same retry
+  behavior (closing the result view and reopening the panel still re-runs the same flow), same
+  `MigrationOutcome` shape consumed identically by the result view.
+- [x] Confirmed no application code outside `src/repository/*.ts` and `migration.ts`/
+  `MigrationPanel.tsx` (excluding tests) calls any of the now-scoped functions.
+  `getAuthenticatedSessionFor` now has its **first** real application caller — via migration's
+  `upsertX` calls — so, unlike every prior inert-primitive phase, the production bundle is **not**
+  byte-for-byte unchanged this time: `npm run build` grew from 510.13 kB to 510.78 kB
+  (`dist/assets/index-CIBzSJyq.js`). This is expected and correct: the pinned-client construction
+  logic inside `getAuthenticatedSessionFor` (previously fully tree-shaken, since nothing imported
+  it) is now reachable from the shipped app through `migration.ts`, which `MigrationPanel.tsx`
+  already imports. No other application behavior changed — the size increase is attributable
+  entirely to this one previously-dead code path becoming live.
+- [x] Tests: each repository test file gained one `'account-mismatch'` case per changed function,
+  including the three `upsert*` functions (15 new repository tests total, matching-account cases
+  updated to pass `expectedAccountId`). `src/repository/migration.test.ts` gained a
+  `'runMigration — account-affinity pinning'` describe block with two tests: the validated account
+  id is passed to every `upsertX` call (never derived from the records) on a successful migration,
+  and an account-mismatch on a later record stops the migration immediately (`authError` set,
+  already-uploaded records still reported as uploaded, nothing after the mismatch attempted, no
+  verification re-read) without discarding what already succeeded. `src/components/
+  MigrationPanel.test.tsx`'s existing "only calls runMigration after explicit confirmation" test
+  now also asserts the exact `(state, accountId)` arguments. 202 tests passing (up from 185 before
+  Phase 5B3A task 2, 197 after its first slice, 202 now that the `upsert*` exception is closed).
+- [ ] Not done (by design — deferred to 5B3A task 3 and 5B3B/5B3C): no dirty-tracking `markDirty`
+  wiring or `ACTION_PROVENANCE` table; no sync-engine drain loop or generation/cancellation
+  scaffold; no linking UI; still no cloud write of any kind beyond Phase 5A's existing migration
+  path — `create*`/`update*`/`*Guarded`/`delete*` still have zero application callers, and
+  migration's behavior, sequencing, UI, eligibility checks, and completion state are all unchanged.
+
 ### Phases 5B3B/5B3C, 6, 7 — not started
 
 See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
 
-**Next recommended step (subject to review of this slice):** finish Phase 2's manual cross-account verification (still outstanding, independent of this work); manually verify 5B2 above against the production project; then continue 5B3A — requiring `expectedAccountId` on the mutating repository functions and adding the `ACTION_PROVENANCE`-driven dirty-marking, still inert — before 5B3B activates any write.
+**Next recommended step (subject to review of this slice):** finish Phase 2's manual cross-account verification (still outstanding, independent of this work); manually verify 5B2 above against the production project; then continue 5B3A — adding the `ACTION_PROVENANCE`-driven dirty-marking and the sync-engine generation/cancellation scaffold (task 3 of 3), still inert — before 5B3B activates any write. Task 2 of 3 is now fully complete, with no `upsert*` exception remaining.
 
 ## Latest test results
 
 ```
 npm run test
 Test Files  23 passed (23)
-Tests       185 passed (185)
+Tests       202 passed (202)
 ```
 
-(180 passed as of `bf7d967`, before this task's 5 new tests. The doc's previous "171 passed"
-figure predated the `bf7d967` blank-note-fix commit's own 9 additional tests and was stale
-independent of this task.)
+(185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
+`update*`/`*Guarded`/`delete*` scoped; 202 now that `upsert*` is scoped too and migration's tests
+were extended.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-Caou51tN.js   510.13 kB
+dist/assets/index-CIBzSJyq.js   510.78 kB
 ```
 
-(Confirmed byte-for-byte identical — same file hash, same 510,131 bytes — to a clean build of
-`bf7d967` without this task's changes; see the 5B3A section above.)
+(Grew from 510.13 kB — expected. `getAuthenticatedSessionFor`'s pinned-client construction logic,
+previously fully tree-shaken since nothing imported it, is now reachable from the shipped app via
+migration's `upsertX` calls; see the 5B3A task 2 section above. No other application behavior
+changed.)
 
 ## Lint
 
