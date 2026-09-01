@@ -3,6 +3,7 @@ import { AppShell } from './components/AppShell';
 import { AppProvider } from './store/AppContext';
 import { AuthProvider } from './store/AuthContext';
 import { CloudSyncProvider } from './store/CloudSyncContext';
+import { SyncEngineProvider } from './store/SyncEngineContext';
 import { BoardView } from './views/BoardView';
 import { DailyNotesView } from './views/DailyNotesView';
 import { ProjectsView } from './views/ProjectsView';
@@ -16,19 +17,21 @@ export default function App() {
     <AuthProvider>
       <AppProvider>
         <CloudSyncProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route element={<AppShell />}>
-                <Route index element={<TodayView />} />
-                <Route path="board" element={<BoardView />} />
-                <Route path="tasks" element={<TasksView />} />
-                <Route path="projects" element={<ProjectsView />} />
-                <Route path="notes" element={<DailyNotesView />} />
-                <Route path="settings" element={<SettingsView />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
+          <SyncEngineProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route element={<AppShell />}>
+                  <Route index element={<TodayView />} />
+                  <Route path="board" element={<BoardView />} />
+                  <Route path="tasks" element={<TasksView />} />
+                  <Route path="projects" element={<ProjectsView />} />
+                  <Route path="notes" element={<DailyNotesView />} />
+                  <Route path="settings" element={<SettingsView />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Route>
+              </Routes>
+            </BrowserRouter>
+          </SyncEngineProvider>
         </CloudSyncProvider>
       </AppProvider>
     </AuthProvider>

@@ -3,6 +3,8 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createEmptyAppData, type AppData } from '../types';
 import { MigrationPanel } from './MigrationPanel';
+import { getAccountMetadata } from '../sync/metadata';
+import { loadSyncMetadataStore } from '../sync/metadataStorage';
 
 const appState = vi.hoisted(() => ({
   current: { version: 1, tasks: [], projects: [], dailyNotes: [] } as AppData,
@@ -51,6 +53,7 @@ function seedLocalData(): AppData {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   authState.isSupabaseConfigured = true;
   authState.user = null;
   appState.current = seedLocalData();
@@ -237,5 +240,51 @@ describe('MigrationPanel — local data retained', () => {
 
     expect(screen.getByText(/Local data in this browser has not been deleted or changed/i)).toBeTruthy();
     expect(appState.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('MigrationPanel — account linking (Risk 2)', () => {
+  it('marks this device linked to the account once migration completes and is fully verified', async () => {
+    authState.user = { id: 'account-1', email: 'person@example.com' };
+    migration.getCloudCounts.mockResolvedValue({ ok: true, data: { projects: 0, tasks: 0, dailyNotes: 0 } });
+    migration.runMigration.mockResolvedValue({
+      ok: true,
+      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
+      uploaded: { projects: 1, tasks: 1, dailyNotes: 1 },
+      uploadFailures: [],
+      verification: { passed: true, cloudCountsAfter: { projects: 1, tasks: 1, dailyNotes: 1 }, issues: [] },
+    });
+
+    expect(getAccountMetadata(loadSyncMetadataStore(), 'account-1').established).toBe(false);
+
+    render(<MigrationPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Migrate this device/i }));
+    await waitFor(() => expect(screen.getByText(/Copy device data to your account/i)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Copy data to cloud/i }));
+    await waitFor(() => expect(screen.getByText(/Migration complete and verified/i)).toBeTruthy());
+
+    expect(getAccountMetadata(loadSyncMetadataStore(), 'account-1').established).toBe(true);
+  });
+
+  it('does not mark this device linked when migration reports a partial failure', async () => {
+    authState.user = { id: 'account-1', email: 'person@example.com' };
+    migration.getCloudCounts.mockResolvedValue({ ok: true, data: { projects: 0, tasks: 0, dailyNotes: 0 } });
+    migration.runMigration.mockResolvedValue({
+      ok: false,
+      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
+      uploaded: { projects: 1, tasks: 0, dailyNotes: 1 },
+      uploadFailures: [
+        { entity: 'task', id: 't1', label: 'Buy milk', message: 'violates foreign key constraint' },
+      ],
+      verification: { passed: true, cloudCountsAfter: { projects: 1, tasks: 0, dailyNotes: 1 }, issues: [] },
+    });
+
+    render(<MigrationPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /Migrate this device/i }));
+    await waitFor(() => expect(screen.getByText(/Copy device data to your account/i)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Copy data to cloud/i }));
+    await waitFor(() => expect(screen.getByText(/finished with problems/i)).toBeTruthy());
+
+    expect(getAccountMetadata(loadSyncMetadataStore(), 'account-1').established).toBe(false);
   });
 });

@@ -161,14 +161,27 @@ describe('createProject', () => {
     });
   });
 
-  it('surfaces a database failure (e.g. a duplicate id) as a typed error', async () => {
+  it('surfaces a database failure without a unique-violation code as a generic typed error', async () => {
     signIn();
     from.mockReturnValue(
-      makeBuilder({ data: null, error: { message: 'duplicate key value violates unique constraint' } }),
+      makeBuilder({ data: null, error: { message: 'permission denied for table projects' } }),
     );
     const result = await createProject({ id: 'p1', name: 'Home', status: 'active' }, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('classifies a unique-violation (Postgres code 23505) as a typed duplicate error, not a generic database error', async () => {
+    signIn();
+    from.mockReturnValue(
+      makeBuilder({
+        data: null,
+        error: { message: 'duplicate key value violates unique constraint "projects_pkey"', code: '23505' },
+      }),
+    );
+    const result = await createProject({ id: 'p1', name: 'Home', status: 'active' }, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('duplicate');
   });
 
   it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {

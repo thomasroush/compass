@@ -8,6 +8,8 @@ import {
   type MigrationCounts,
   type MigrationOutcome,
 } from '../repository/migration';
+import { getAccountMetadata, markEstablished, upsertAccountMetadata } from '../sync/metadata';
+import { loadSyncMetadataStore, saveSyncMetadataStore } from '../sync/metadataStorage';
 
 type Step = 'idle' | 'checking' | 'confirming' | 'migrating' | 'result';
 
@@ -79,6 +81,17 @@ export function MigrationPanel() {
   async function confirmMigration() {
     setStep('migrating');
     const result = await runMigration(state, accountId);
+    if (result.ok) {
+      // A fully verified migration is one of the approved ways this device
+      // becomes linked to this account (see SUPABASE_IMPLEMENTATION_PLAN.md
+      // decision 9 and Phase 5B3B's account-linking gate) — reuses the same
+      // `established` flag Phase 5B2's hydration already sets, rather than a
+      // new format. Only a *fully successful and verified* migration
+      // (`result.ok`, never a partial failure) marks the link.
+      const store = loadSyncMetadataStore();
+      const nextMetadata = markEstablished(getAccountMetadata(store, accountId));
+      saveSyncMetadataStore(upsertAccountMetadata(store, nextMetadata));
+    }
     setOutcome(result);
     setStep('result');
   }

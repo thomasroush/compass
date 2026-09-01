@@ -9,20 +9,27 @@ import {
 import { createEmptyAppData, generateId, type AppData } from '../types';
 import { flushSave, loadAppData } from '../storage/storage';
 import { classifyActionProvenance, resolveDirtyTargets } from '../sync/actionProvenance';
-import { createSyncGeneration } from '../sync/generation';
+import { createSyncGeneration, type SyncGeneration } from '../sync/generation';
 import {
-  createEmptySyncMetadataStore,
+  clearAllDirty,
   getAccountMetadata,
   markDirty,
   upsertAccountMetadata,
-  type SyncMetadataStore,
 } from '../sync/metadata';
+import { loadSyncMetadataStore, saveSyncMetadataStore } from '../sync/metadataStorage';
 import { useAuth } from './useAuth';
 import { appReducer, type AppAction } from './reducer';
 
 interface AppContextValue {
   state: AppData;
   dispatch: React.Dispatch<AppAction>;
+  /**
+   * Phase 5B3B — exposed so `SyncEngineContext` can check `isCurrent()`
+   * between network operations and stop promptly after sign-out, account
+   * switch, RESET, IMPORT, or this provider's own teardown, without ever
+   * attempting to cancel a request already sent. See src/sync/generation.ts.
+   */
+  syncGeneration: SyncGeneration;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);
@@ -61,22 +68,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const accountIdRef = useRef(accountId);
   accountIdRef.current = accountId;
 
-  // In-memory only for this phase (Phase 5B3A, task 3 of 3) — deliberately
-  // never read from or written to `daily-compass-sync-v1` here. It starts
-  // empty every session and is never persisted, so it cannot drift from or
-  // clobber whatever CloudSyncContext's hydration flow has separately saved
-  // there; nothing yet reads this dirty bookkeeping either, so there is
-  // nothing to lose by keeping it in-memory-only at this stage.
-  const metadataStoreRef = useRef<SyncMetadataStore>(createEmptySyncMetadataStore());
-
   // Phase 5B3A's generation/cancellation scaffold — see src/sync/generation.ts.
   const syncGenerationRef = useRef(createSyncGeneration());
   const previousAccountIdRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    // Skip the very first run (mounting with an already-known account is not
-    // a "change") — only an actual transition invalidates the generation.
-    if (previousAccountIdRef.current !== undefined && previousAccountIdRef.current !== accountId) {
+    // Only invalidate when there *was* an active account whose pending work
+    // could now be stale — sign-out (a real account -> null) or switching to
+    // a different real account. Deliberately does NOT invalidate on sign-in
+    // (undefined-sentinel or null -> a real account): nothing was running
+    // for this device while signed out, so there is nothing to protect
+    // against, and a drain triggered by this very sign-in (see
+    // SyncEngineContext.tsx's effect on the same accountId transition) must
+    // not have its own just-captured generation invalidated by the sign-in
+    // that started it — these two effects run from the same render.
+    if (previousAccountIdRef.current && previousAccountIdRef.current !== accountId) {
       syncGenerationRef.current.invalidate();
     }
     previousAccountIdRef.current = accountId;
@@ -100,23 +106,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (currentAccountId) {
         const targets = resolveDirtyTargets(action, stateRef.current);
         if (targets.length > 0) {
-          let accountMetadata = getAccountMetadata(metadataStoreRef.current, currentAccountId);
+          // Durable as of Phase 5B3B: loaded and saved fresh on every
+          // dirty-producing dispatch, not held in memory — a refresh or
+          // brief offline period must not lose unsynced work. Read-patch-save
+          // (never a batch spanning an `await`) so this can never race with
+          // the sync engine's own per-record patches to other ids.
+          const store = loadSyncMetadataStore();
+          let accountMetadata = getAccountMetadata(store, currentAccountId);
           for (const target of targets) {
             accountMetadata = markDirty(accountMetadata, target.entity, target.id);
           }
-          metadataStoreRef.current = upsertAccountMetadata(metadataStoreRef.current, accountMetadata);
+          saveSyncMetadataStore(upsertAccountMetadata(store, accountMetadata));
         }
       }
     } else if (action.type === 'RESET' || action.type === 'IMPORT') {
       // LOAD and APPLY_REMOTE_UPDATE are also sync-boundary but are not
       // invalidation triggers themselves — see src/sync/generation.ts.
       syncGenerationRef.current.invalidate();
+
+      // RESET/IMPORT wholesale-replace local state, so whatever was
+      // previously dirty for the current account no longer corresponds to
+      // anything the (new) local state holds — see clearAllDirty's doc
+      // comment. Only the *currently authenticated* account's bucket is
+      // touched; a different account's pending work is never affected by an
+      // action that happens while it isn't the active account (bind-to-
+      // account, never cross-account).
+      const currentAccountId = accountIdRef.current;
+      if (currentAccountId) {
+        const store = loadSyncMetadataStore();
+        const accountMetadata = clearAllDirty(getAccountMetadata(store, currentAccountId));
+        saveSyncMetadataStore(upsertAccountMetadata(store, accountMetadata));
+      }
     }
 
     rawDispatch(action);
   }, []);
 
   return (
-    <AppContext.Provider value={{ state, dispatch }}>{children}</AppContext.Provider>
+    <AppContext.Provider value={{ state, dispatch, syncGeneration: syncGenerationRef.current }}>
+      {children}
+    </AppContext.Provider>
   );
 }

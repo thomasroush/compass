@@ -46,7 +46,10 @@ export async function createProject(
     .select(PROJECT_COLUMNS)
     .single();
 
-  if (error) return { ok: false, error: makeError('database', error.message) };
+  if (error) {
+    // Postgres's own stable code for unique_violation — see RepositoryErrorType's doc comment.
+    return { ok: false, error: makeError(error.code === '23505' ? 'duplicate' : 'database', error.message) };
+  }
   return { ok: true, data: projectFromRow(data as unknown as ProjectRow) };
 }
 

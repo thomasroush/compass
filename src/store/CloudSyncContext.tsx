@@ -29,10 +29,14 @@ import { useAuth } from './useAuth';
  *
  * No cloud write is made anywhere in this file — only device-local sync
  * metadata (`src/sync/metadataStorage.ts`, a separate storage key from
- * `AppData`) is updated, and only after a successful hydration, to record
- * that this device is now linked to the account and what server
- * `updated_at` it has seen for each record it just loaded. That bookkeeping
- * is what a future guarded-write phase needs; it is never sent to Supabase.
+ * `AppData`) is updated, and only after a successful hydration (or a
+ * both-empty decision — see below), to record that this device is now
+ * linked to the account and what server `updated_at` it has seen for each
+ * record it just loaded. That bookkeeping is what Phase 5B3B's write-back
+ * needs, both as the source of each record's guarded-update baseline and —
+ * via the same `established` flag — as the account-linking gate that
+ * `SyncEngineContext.tsx` requires before it will drain any local edit to
+ * this account; it is never sent to Supabase.
  */
 
 export type CloudSyncStatus =
@@ -150,7 +154,20 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
           setMessage(result.decision.message);
           return;
 
-        case 'both-empty':
+        case 'both-empty': {
+          // Nothing exists on either side, so there is nothing that could
+          // conflict — safe to mark this device linked immediately rather
+          // than leaving a brand-new account permanently unable to
+          // auto-sync until it happens to run a migration with something to
+          // migrate. One of the "another explicit account-link decision
+          // defined by the plan" cases Phase 5B3B's linking gate allows.
+          const nextMetadata = markEstablished(accountMetadata);
+          saveSyncMetadataStore(upsertAccountMetadata(metadataStore, nextMetadata));
+          setStatus('idle');
+          setMessage(null);
+          return;
+        }
+
         case 'await-explicit-migration':
         case 'signed-out':
         default:

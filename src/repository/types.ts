@@ -22,13 +22,23 @@ export type CloudDailyNote = DailyNote & { updatedAt: string };
  * the write ran. It is distinct from 'unauthenticated' (nobody signed in at
  * all) and is fail-closed: it is never used to select or authorize an
  * account, only to refuse acting on behalf of the wrong one.
+ *
+ * 'duplicate' is returned only by `createX` when the insert violates a
+ * unique constraint — detected from Postgres's own stable SQLSTATE code
+ * (`23505`, `unique_violation`) on the returned `PostgrestError`, not by
+ * matching the error's free-text message. Most commonly this means a row
+ * with this id already exists for this user (e.g. from Phase 5A migration,
+ * or a "create succeeded but the response was lost" retry) — the caller is
+ * expected to re-read the existing row and decide how to proceed, never to
+ * treat the duplicate itself as permission to overwrite.
  */
 export type RepositoryErrorType =
   | 'unconfigured'
   | 'unauthenticated'
   | 'database'
   | 'conflict'
-  | 'account-mismatch';
+  | 'account-mismatch'
+  | 'duplicate';
 
 export interface RepositoryError {
   type: RepositoryErrorType;

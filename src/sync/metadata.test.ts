@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clearAllDirty,
   clearDirty,
+  countDirty,
   createEmptyAccountMetadata,
   createEmptySyncMetadataStore,
   getAccountMetadata,
   getRecordUpdatedAt,
+  hasDirtyWork,
   isDirty,
   markDirty,
   markEstablished,
@@ -76,5 +79,28 @@ describe('record and dirty helpers', () => {
     let metadata = createEmptyAccountMetadata('acct-1');
     metadata = setLastSyncedAt(metadata, '2026-08-31T12:00:00.000Z');
     expect(metadata.lastSyncedAt).toBe('2026-08-31T12:00:00.000Z');
+  });
+
+  it('clearAllDirty empties every entity at once (RESET/IMPORT)', () => {
+    let metadata = createEmptyAccountMetadata('acct-1');
+    metadata = markDirty(metadata, 'task', 't1');
+    metadata = markDirty(metadata, 'project', 'p1');
+    metadata = markDirty(metadata, 'dailyNote', 'n1');
+
+    metadata = clearAllDirty(metadata);
+
+    expect(metadata.dirty).toEqual({ project: [], task: [], dailyNote: [] });
+  });
+
+  it('hasDirtyWork/countDirty reflect the total across all entities', () => {
+    let metadata = createEmptyAccountMetadata('acct-1');
+    expect(hasDirtyWork(metadata)).toBe(false);
+    expect(countDirty(metadata)).toBe(0);
+
+    metadata = markDirty(metadata, 'task', 't1');
+    metadata = markDirty(metadata, 'project', 'p1');
+
+    expect(hasDirtyWork(metadata)).toBe(true);
+    expect(countDirty(metadata)).toBe(2);
   });
 });

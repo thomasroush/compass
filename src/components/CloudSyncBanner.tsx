@@ -6,6 +6,14 @@ import { useCloudSync } from '../store/useCloudSync';
  * editable app state without live cloud write activation, that must always
  * be visible to the user, not something that quietly drifts. Rendered once,
  * globally, in AppShell, so it shows on every view.
+ *
+ * Phase 5B3B correction: live cloud-write activation has now landed (see
+ * `SyncEngineContext.tsx`), so the "changes are saved on this device only"
+ * safeguard this banner used to show after every hydration would now be
+ * false for a signed-in device — decision 12 required the two to land
+ * together or the safeguard to stay visible; they have now landed together,
+ * so the safeguard text is removed rather than left inaccurate. Write-sync
+ * status itself is shown separately, in Settings (`SyncStatusPanel.tsx`).
  */
 export function CloudSyncBanner() {
   const sync = useCloudSync();
@@ -40,12 +48,10 @@ export function CloudSyncBanner() {
     );
   }
 
-  if (sync.status === 'hydrated' || sync.status === 'up-to-date') {
+  if (sync.status === 'hydrated') {
     return (
       <p className="message cloud-sync-banner" role="status">
-        {sync.status === 'hydrated' ? "Loaded your account's data onto this device. " : ''}
-        Changes you make are saved on this device only &mdash; cloud sync writes are not active
-        yet.
+        Loaded your account&rsquo;s data onto this device.
       </p>
     );
   }

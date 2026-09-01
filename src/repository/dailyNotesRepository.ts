@@ -46,7 +46,13 @@ export async function createDailyNote(
     .select(DAILY_NOTE_COLUMNS)
     .single();
 
-  if (error) return { ok: false, error: makeError('database', error.message) };
+  if (error) {
+    // Postgres's own stable code for unique_violation — see RepositoryErrorType's doc comment.
+    // Note: this table also has a unique (user_id, note_date) constraint independent of id,
+    // so a 'duplicate' here doesn't always mean *this id* already exists — callers that look
+    // the id up afterward and don't find it are expected to treat that as unresolved, not assume it.
+    return { ok: false, error: makeError(error.code === '23505' ? 'duplicate' : 'database', error.message) };
+  }
   return { ok: true, data: dailyNoteFromRow(data as unknown as DailyNoteRow) };
 }
 

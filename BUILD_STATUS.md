@@ -42,7 +42,7 @@ Current status: app behavior and localStorage persistence are unchanged. No code
 - [x] `supabase/migrations/20260830120000_phase2_core_schema_and_rls.sql` has been executed against the Supabase project. `public.projects`, `public.tasks`, and `public.daily_notes` all exist, each with composite `(user_id, id)` primary keys, RLS enabled, and four separate owner-only policies (`select`/`insert`/`update`/`delete`, each scoped to `auth.uid() = user_id`).
 - [x] Confirmed the target Postgres version is 17.6 — well past the 15+ requirement the migration's column-specific `on delete set null (project_id)` clause depends on, so the tasks→projects foreign key applied as designed (detaches a deleted project's tasks without touching `user_id`).
 - [x] RLS inventory verified directly against the applied schema: all three tables have `rowsecurity = true` and exactly four policies each (owner-only, `to authenticated`), matching the migration file with no drift.
-- [ ] **Deliberately deferred, not merely outstanding (reviewed 2026-09-01):** the manual cross-account verification pass (sign in as a second test account and confirm it cannot read/write the first account's rows, and that a signed-out request is rejected) called for in the plan's Phase 2 deliverables. The procedure itself was reviewed and documented (a Supabase SQL-editor session, simulating a second test account via `set local role authenticated; set local request.jwt.claim.sub = '<id>'`, plus a `set local role anon` signed-out check — no application code needed, no token ever handled) but **has not been executed against the live project**. It is intentionally scheduled for immediately before Phase 5B3B activates the first real automatic cloud write, not before now, since no application code writes to these tables outside Phase 5A's explicit, manual migration and this task's dirty-tracking remains fully inactive (see Phase 5B3A task 3 below). Do not read this as "already performed" — it has not been.
+- [ ] **Deliberately deferred, not merely outstanding (reviewed 2026-09-01, still not performed as of Phase 5B3B below):** the manual cross-account verification pass (sign in as a second test account and confirm it cannot read/write the first account's rows, and that a signed-out request is rejected) called for in the plan's Phase 2 deliverables. The procedure itself was reviewed and documented (a Supabase SQL-editor session, simulating a second test account via `set local role authenticated; set local request.jwt.claim.sub = '<id>'`, plus a `set local role anon` signed-out check — no application code needed, no token ever handled) but **has not been executed against the live project**. Phase 5B3B (below) now activates real automatic cloud writes for ordinary signed-in edits, which makes this verification more important than ever — it remains explicitly scheduled as a manual, out-of-session step and was deliberately **not** run during 5B3B's implementation, per this session's own instruction. Do not read this as "already performed" — it has not been, and should be done against the live project before relying on RLS in production with real multi-device data.
 
 ### Phase 3 — Authentication and login interface (complete)
 
@@ -515,48 +515,296 @@ unchanged and remains the sole thing that actually happens on a dispatch, behavi
   Phase 2 manual cross-account RLS verification remains un-executed, deliberately scheduled for
   immediately before 5B3B activates the first real write (see the Phase 2 section above).
 
-### Phases 5B3B/5B3C, 6, 7 — not started
+### Phase 5B3B — account-bound cloud write-back (complete)
+
+The first phase to activate real, automatic cloud writes for ordinary signed-in edits. Explicitly
+scoped by this session to *not* include login gating or startup cloud hydration (5B2's existing
+hydration is unchanged) and *not* to add Supabase Realtime — those, plus the interactive
+`require-explicit-choice` linking UI and signed-in Import cloud-push, remain 5B3C's job.
+
+**Architecture.** Two new layers, plus durable persistence added to the dispatch wrapper Phase
+5B3A built:
+
+- `src/sync/drainSync.ts` — `drainDirtyWork(accountId, isGenerationCurrent, getLocalState)`: one
+  drain *pass* over every currently-dirty id for one account, in `project` -> `task` -> `dailyNote`
+  order. For each id it re-loads `daily-compass-sync-v1` fresh, decides create-vs-update from
+  whether a `records[entity][id].lastKnownUpdatedAt` is already known (unknown -> `createX`; known
+  -> `updateXGuarded` with that exact value as `expectedUpdatedAt`), builds the payload from
+  whatever the local record's fields currently are (never a stored per-operation diff), calls the
+  matching Phase 5B3A account-scoped repository function, and durably patches metadata (one small
+  read-patch-save, never a batch spanning an `await`) the instant the outcome is known — success
+  clears dirty and advances `lastKnownUpdatedAt`; every other outcome leaves the record dirty.
+  Checks `isGenerationCurrent()` before every id and stops the pass (without throwing) the instant
+  it returns false, on any account-level error (`unauthenticated`/`unconfigured`/`account-mismatch`
+  — the whole account context is suspect, so the rest of the pass is skipped too, not just that
+  id), or on the first thrown/rejected (network-level) failure, which is caught here so one offline
+  moment can't escape as an unhandled rejection.
+- `src/store/SyncEngineContext.tsx` (`SyncEngineProvider`, via `src/store/useSyncEngine.ts`) — owns
+  *when* to call `drainDirtyWork`: single-flight (an in-flight drain absorbs a concurrent trigger
+  into one guaranteed rerun immediately after, rather than starting a second overlapping pass),
+  bounded exponential backoff on a network-level failure (documented below), and the minimal
+  `SyncStatus` (`'idle' | 'pending' | 'syncing' | 'synced' | 'conflict' | 'offline' | 'error'`)
+  this phase calls for — always derived fresh from the durable dirty count for the signed-in
+  account (never an independently-tracked boolean), so it structurally cannot claim `'synced'`
+  while pending work remains. Triggers a drain automatically whenever local state changes while
+  signed in (covers every accepted user edit) and whenever an authenticated session becomes
+  available (covers sign-in with pre-existing dirty work, e.g. from a previous offline session).
+  Exposes `syncNow()` — decision 7's manual "Sync now" action — which is a no-op while signed out
+  and otherwise just calls the same `attemptDrain`, safely coalescing with the single-flight guard
+  if one is already running.
+- `src/components/SyncStatusPanel.tsx` — mounted in Settings, between `AccountPanel` and
+  `MigrationPanel`. Plain text per status plus the pending count and the "Sync now" button; renders
+  nothing while signed out or unconfigured, matching every other cloud panel in Settings. No
+  emojis, no new colors or decorative elements — reuses the existing `message`/`message error`/
+  `section-help` classes.
+- `src/store/AppContext.tsx` — the dispatch wrapper's dirty-marking is now durable: it loads
+  `daily-compass-sync-v1` fresh, marks dirty, and saves immediately on every dirty-producing
+  dispatch (previously in-memory-only, per Phase 5B3A task 3's explicit "not at this stage" note —
+  this is that later stage). `RESET`/`IMPORT` now also clear the *entire* dirty set for the
+  currently-authenticated account (new `clearAllDirty` in `src/sync/metadata.ts`) — a wholesale
+  local replacement leaves nothing meaningful behind for the old dirty ids to push, and doing this
+  at the dispatch site (not the drain loop) keeps it correct even if no drain ever runs again. Only
+  the *active* account's bucket is touched; a different account's dirty work is never affected by
+  an action that happens while it isn't the signed-in account. `syncGeneration` (built inert in
+  5B3A) is now exposed on `AppContextValue` so `SyncEngineContext` can check it.
+- **A real bug found and fixed during this phase's own testing:** the account-change
+  generation-invalidation effect (5B3A) originally invalidated on *any* transition, including
+  signing in from signed-out (`null` -> a real account). Since `SyncEngineContext`'s own
+  auto-drain-on-sign-in effect fires from that exact same transition, in the same render, the
+  freshly-started drain's own captured generation was invalidated by the sign-in that triggered it,
+  self-cancelling every automatic post-sign-in drain before it could apply its result. Fixed to
+  invalidate only when there *was* an active account whose work could be stale — a real
+  account-to-different-account switch, or a real account to signed-out — never on sign-in itself,
+  since nothing runs while signed out for there to protect against. `AppContext.test.tsx`'s
+  generation test for this case was itself testing the old, buggy expectation and has been
+  corrected alongside the fix.
+
+**Durable sync-metadata format.** Unchanged from Phase 5B1/5B3A's `SyncMetadataStore` under
+`daily-compass-sync-v1` — no schema migration needed. `AccountSyncMetadata.dirty: Record<SyncEntity,
+string[]>` remains a de-duplicated *set* of ids per entity, not a queue of operations: this is
+deliberate and is what makes coalescing free — a record dirtied by several rapid edits appears once,
+and because the drain loop always reads the record's *current* local content immediately before
+sending (never a stored snapshot from when it was first marked dirty), whatever the latest,
+converged local state is at drain time is exactly what gets pushed, with no separate merge or
+replay logic required. `AccountSyncMetadata.records: Record<SyncEntity, Record<id,
+{lastKnownUpdatedAt}>>` is what distinguishes "never confirmed to exist in the cloud" (id absent —
+`createX`) from "confirmed cloud version known" (id present — `updateXGuarded`), so a brand-new
+local record is never mistaken for a guarded update against a row that doesn't exist yet.
+
+**Create / update / conflict / retry behavior.**
+- *Create*: unknown record -> `createX(record, accountId)`. If it fails with a database error whose
+  message matches a duplicate-key pattern (the realistic case: a record already pushed by Phase 5A
+  migration, edited before this device ever hydrated/learned its cloud `updatedAt`) — falls back to
+  the existing `listX()` read (not a new repository function; `list*` was already exempt from
+  Phase 5B3A's `expectedAccountId` requirement), adopts the found row's `updatedAt` into
+  `records[entity][id]`, and leaves the record dirty so the *next* pass correctly takes the
+  guarded-update path instead of failing the same way forever.
+- *Update*: known record -> `updateXGuarded(id, updates, expectedUpdatedAt, accountId)` with
+  `expectedUpdatedAt` taken verbatim from `records[entity][id].lastKnownUpdatedAt` and `updates`
+  built from every current mutable field (a full-record push), not a stored diff.
+- *Conflict*: `updateXGuarded` returning a typed `'conflict'` leaves the record dirty and does
+  **not** advance `lastKnownUpdatedAt` (so a stale guarded update is never silently retried against
+  the same stale baseline) and does **not** force an unconditional overwrite — matches decision 15
+  exactly. The pass continues to the next dirty id rather than stopping; a `'conflict'` status is
+  reported, and resolving it is 5B3C's interactive-linking job, out of scope here.
+- *Retry*: only a thrown/rejected (network-level) failure schedules an automatic retry — a
+  structured `{ok:false, error:{type:'database'}}` response (the server itself responded) is
+  treated as not blindly retryable and is left for the next *natural* trigger (another edit,
+  sign-in, or "Sync now"), never a timer. **Bounded backoff policy** (`SyncEngineContext.tsx`):
+  `2000ms * 2^attempt`, capped at `30000ms`, for up to 5 consecutive network failures; the attempt
+  counter resets to zero the moment any pass completes without one. After 5, automatic retry stops
+  — never an infinite rapid loop — and only a natural trigger tries again.
+
+**Account-switch and cancellation guarantees.** Every repository call still goes through Phase
+5B3A's `getAuthenticatedSessionFor(expectedAccountId)` — `expectedAccountId` is always the account
+the dirty work is durably filed under (`daily-compass-sync-v1`'s own keying), never derived from a
+record or read back from `localStorage` as authority. The drain loop checks the generation between
+every network operation (never during one) and stops promptly — without attempting to cancel a
+request already sent — on sign-out, an account switch, `RESET`, `IMPORT` (all bump the generation
+in `AppContext.tsx`), or `SyncEngineProvider`'s own teardown (which also clears any scheduled retry
+timer directly, independent of generation). A stale drain's result is discarded, not applied, if
+the generation moved on while it was in flight (checked again immediately after the drain resolves,
+before touching any UI state). Two accounts' dirty queues never cross-contaminate: each is a
+separate bucket in the same durable store, and a drain for account A only ever reads/writes A's
+bucket.
+
+**Status visible to the user.** `SyncStatusPanel` in Settings, signed-in only: *"Local changes
+pending — waiting to sync to your account,"* *"Syncing changes to your account…,"* *"All changes
+are synced to your account,"* a conflict/offline/error message (with the pending count shown
+whenever it's nonzero), and a "Sync now" button (disabled only while actively syncing). No
+emojis, no progress bars, no per-record UI — the minimal set this phase calls for.
+`CloudSyncBanner`'s pre-existing "changes are saved on this device only" safeguard (Phase 5B2,
+governed by decision 12) is removed for the `'hydrated'`/`'up-to-date'` states: it would now be
+false, since write-sync is live for a signed-in device. Decision 12 required hydration and write
+activation to land together or the safeguard to stay — they have now landed together.
+
+**Every application path that can now write to Supabase:** exactly one — `SyncEngineContext`'s
+`attemptDrain` -> `drainDirtyWork` -> the Phase 5B3A account-scoped `createX`/`updateXGuarded`
+functions, triggered only by (a) a dirty-producing dispatch while signed in, (b) an authenticated
+session becoming available, or (c) the "Sync now" button. Phase 5A's migration path
+(`upsertX`, gated behind its own explicit user confirmation) is unchanged and independent.
+`create*`(unguarded)/`update*`(unguarded)/`delete*`/`*Guarded`-for-conflict-resolution and the
+`deleteX` functions still have no application caller — no per-record deletion or tombstone sync
+exists (decision 8), matching the app's existing archive-only "remove" gesture.
+
+**Tests (98 new across the initial implementation and the correction above; suite total 325, up
+from 261):** `src/sync/drainSync.test.ts` (23) — create path with the exact `accountId`; update
+path with the known `expectedUpdatedAt` and a full-record payload; never mistaking a new record for
+a guarded update; coalescing (a create-then-rapid-updates scenario, a known-record rapid-updates
+scenario, and an edit landing mid-flight that keeps the record dirty while still advancing the
+baseline); conflict (leaves dirty, doesn't advance the baseline, continues to the next id); every
+account-level error type stopping the whole pass immediately with no further ids attempted; a
+thrown network failure classified distinctly, stopping the pass, leaving the record dirty; one
+record's database error never falsely clearing an unrelated record's dirty flag; a missing local
+record cleared instead of retried forever; the generation check stopping before the next id;
+durability across a simulated reload; project-before-task-before-dailyNote ordering; and, from the
+Risk 1 correction, the full duplicate-create resolution table (identical content clears dirty and
+adopts the real `updated_at`; different content stays dirty, reports a conflict, and never adopts a
+baseline; an unconfirmable duplicate stays dirty without guessing; the same resolution applied to
+projects and daily notes; and a generic `'database'` error with duplicate-sounding text is *not*
+misclassified, proving the typed check replaced the message match rather than supplementing it).
+`src/store/SyncEngineContext.test.tsx` (19) — automatic draining on session-available and on a
+signed-in edit, never while signed out; single-flight; bounded retry; status never reporting
+`'synced'` with pending work still durable; cancellation on sign-out/`RESET`/unmount; manual "Sync
+now" as a no-op while signed out; and, from the Risk 2 correction, a full account-linking-gate
+group: an unlinked signed-in device never calls `drainDirtyWork` even with pending work and reports
+`'unlinked'`; dirty-marking still saves durably while unlinked; "Sync now" cannot bypass the gate;
+becoming linked (e.g. by a simulated completed migration) makes the device eligible without needing
+to sign out and back in; switching to a different, unestablished account requires that account's
+own linkage; and a previously-established account's linkage is confirmed to never authorize a
+different, currently signed-in account's writes. `src/components/SyncStatusPanel.test.tsx` (14, new
+file) — visibility while signed out/unconfigured; every status's wording, with particular attention
+to `'unlinked'`'s distinct copy; the pending count; and that the "Sync now" button is disabled (not
+just functionally refused) while unlinked or already syncing, and enabled once linked and idle.
+`src/components/MigrationPanel.test.tsx` gained the migration-side half of the linking gate (+2): a
+fully verified migration marks the account established; a partial failure does not.
+`src/store/CloudSyncContext.test.tsx`'s both-empty test was extended to also assert established
+becomes true (no new test, updated assertion). `src/repository/*Repository.test.ts` each gained a
+typed-`'duplicate'`-classification test (+3) alongside their existing generic-database-error test
+(retitled for clarity, not behavior). `src/store/AppContext.test.tsx` gained the
+sign-in-vs-account-switch generation split described above (net +1). `src/sync/metadata.test.ts`
+gained `clearAllDirty`/`hasDirtyWork`/`countDirty` coverage (+2).
+
+**Confirmed via `npm run build`:** the bundle grew from 514.42 kB to 524.07 kB (523.69 kB before the
+correction below) — expected, since this phase's new modules (`drainSync.ts`,
+`SyncEngineContext.tsx`, `SyncStatusPanel.tsx`) are genuinely imported by the shipped app for the
+first time, and Phase 5B3A's previously-dead `createX`/`updateXGuarded` functions become reachable
+for the first time too.
+
+**Correction (2026-09-01, before this phase was ever committed) — two correctness gaps found and
+fixed during focused review, before acceptance:**
+
+- **Risk 1, duplicate-create recovery.** The original implementation detected a duplicate-id
+  `createX` failure by regexing the error's free-text message, then unconditionally adopted the
+  cloud row's `updated_at` and left the record dirty for "a guarded update next time" — without
+  ever checking whether the cloud row's *content* actually matched what this device wanted to
+  write. That would have let a genuinely different pre-existing cloud record (e.g. from Phase 5A
+  migration, containing another device's edits this device never saw) silently become the baseline
+  for a *future* guarded overwrite, which is exactly the unconditional-overwrite decision 15
+  forbids — discovering a timestamp is not permission to use it. Fixed in `src/sync/drainSync.ts`:
+  - The repository layer now classifies a `createX` failure as a typed `'duplicate'`
+    `RepositoryErrorType` from Postgres's own stable `23505` (`unique_violation`) error code (added
+    to `RepositoryErrorType`; `createProject`/`createTask`/`createDailyNote` in
+    `src/repository/*Repository.ts` each check `error.code === '23505'`), replacing the fragile
+    message-pattern match entirely — not layered alongside it.
+  - A new `resolveDuplicateCreate` re-reads the existing cloud row (via the pre-existing `listX`,
+    still no new repository function) and compares its *actual content* (ignoring `updated_at`) to
+    the current local record. Identical content — the realistic "create succeeded but the response
+    was lost" case — is now safely recognized as synced: the real `updated_at` is adopted and dirty
+    is cleared, because nothing was actually left unsynced. Different content leaves the record
+    dirty, reports a `'conflict'` outcome, and — critically — never calls `setRecordUpdatedAt`, so
+    no future pass can take the "known baseline" guarded-update path against a timestamp that was
+    only ever discovered, never confirmed as this device's own prior write. Resolving that case is
+    explicitly left to Phase 5B3C's future linking/conflict UI.
+- **Risk 2, pre-link automatic writes.** The original implementation drained any signed-in
+  account's dirty work automatically, with no check that this device had ever been through an
+  approved account-link decision first — meaning a browser that merely signed in, with pre-existing
+  local data never confirmed to belong to that account, could have had that data auto-created in
+  the cloud with no user confirmation, contradicting decision 9 ("never guess, never auto-upload")
+  as directly as an unconditional overwrite would. Fixed by adding a durable account-linking gate
+  that reuses `AccountSyncMetadata.established` — the exact flag Phase 5B1/5B2 already defined and
+  Phase 5B2's hydration already sets on a successful `'hydrate-from-cloud'` — rather than inventing
+  a new format:
+  - `src/components/MigrationPanel.tsx` now also marks the account established immediately after a
+    **fully successful and verified** migration (`result.ok`, never a partial failure) — completed
+    migration is one of the plan's own approved link decisions.
+  - `src/store/CloudSyncContext.tsx` now also marks established on the `'both-empty'` hydration
+    decision — nothing exists on either side to conflict, so it is safe to link immediately rather
+    than leaving a brand-new account permanently unable to auto-sync until it happens to run a
+    migration with something in it (one of "another explicit account-link decision defined by the
+    plan").
+  - `src/store/SyncEngineContext.tsx`'s `attemptDrain` — the single point every trigger funnels
+    through, including `syncNow()` — now checks `established` for the exact signed-in account
+    first, before anything else, and refuses (no `drainDirtyWork` call, status `'unlinked'`) if it
+    is not true. Local edits still save immediately and still mark dirty durably while unlinked
+    (local-first is preserved; nothing about dirty-tracking itself makes a network call), they are
+    simply never drained until linked. A new `'unlinked'` `SyncStatus` reports this distinctly from
+    `'synced'`; `SyncStatusPanel`'s "Sync now" button is disabled while unlinked, on top of the
+    functional gate, so the UI itself never offers a control that would silently do nothing.
+  - Because `established` is keyed per-account in the existing `SyncMetadataStore`, switching to a
+    *different* signed-in account on the same device automatically requires that account's own
+    linkage — a previous account's established flag never leaks into authorizing a different
+    account's writes; no additional cross-account logic was needed.
+
+**Not done in 5B3B, by design/instruction:** no login gating, no startup cloud hydration change
+beyond the `'both-empty'` linking addition above, no Supabase Realtime, no interactive
+conflict/linking UI (5B3C — this is exactly what a `'conflict'` status from either a guarded-update
+version conflict or a duplicate-content conflict is left waiting for), no signed-in Import
+cloud-push (5B3C), no per-record deletion or tombstone sync (decision 8), and no manual two-account
+RLS verification against the live project (deliberately left deferred and undone — see the Phase 2
+section above).
+
+**Manual verification still needed (cannot be done from this environment):** the Phase 2
+cross-account RLS check (see above); and, once that's done, exercising a real signed-in edit ->
+automatic sync -> second-device confirmation end-to-end against the production Supabase project.
+
+**Next recommended step (subject to review of this slice):** Phase 5B3B, including the Risk 1/Risk 2
+correction above, is complete and ready for acceptance review. Run the Phase 2 manual cross-account
+RLS verification against the production project before relying on this in a multi-device setting;
+then begin Phase 5B3C (interactive `require-explicit-choice` linking UI, decision 15's three-choice
+resolution, and signed-in Import cloud-push — this is also where an actual duplicate-content
+conflict, or a version conflict, gets a real resolution path instead of staying dirty indefinitely)
+— or, per this session's stated broader goal, the login-gating and startup-hydration work
+explicitly out of scope for 5B3B.
+
+### Phases 5B3C, 6, 7 — not started
 
 See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
-
-**Next recommended step (subject to review of this slice):** Phase 5B3A is now fully complete (all
-three tasks). Before 5B3B implements the actual drain-loop write-back, two things still need to
-happen: manually verify 5B2's hydration path against the production project (still outstanding,
-independent of this work), and execute the Phase 2 manual cross-account RLS verification that has
-been reviewed and documented but deliberately not yet run (see the Phase 2 section above) — this
-session's instruction was explicit that it stay deferred until immediately before 5B3B activates
-real writes, not to perform it now.
 
 ## Latest test results
 
 ```
 npm run test
-Test Files  26 passed (26)
-Tests       261 passed (261)
+Test Files  29 passed (29)
+Tests       325 passed (325)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
 `update*`/`*Guarded`/`delete*` scoped; 202 once `upsert*` was scoped too and migration's tests were
 extended; 251 once Phase 5B3A task 3's provenance/dirty-marking/generation scaffold and its tests
-first landed; 261 now that the REORDER_TASK/enforcePrimaryCap cascading-mutation correction and its
-tests have landed, before task 3 was ever committed.)
+first landed; 261 once the REORDER_TASK/enforcePrimaryCap cascading-mutation correction landed,
+before task 3 was ever committed; 295 once Phase 5B3B's drain loop, sync engine, and durable dirty
+tracking first landed; 325 now that the Risk 1 (duplicate-create) and Risk 2 (account-linking gate)
+correction above has landed with its own tests, before 5B3B was ever committed.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-CCfS1VwY.js   514.42 kB
+dist/assets/index-DijsOgEZ.js   524.07 kB
 ```
 
-(Grew from 510.78 kB — expected. `src/sync/actionProvenance.ts` and `src/sync/generation.ts` are
-genuinely imported by the shipped app for the first time, via `AppContext.tsx`, which every view
-already depends on; see the 5B3A task 3 section above. The cascading-mutation correction added
-further reachable code to `actionProvenance.ts` (513.24 kB → 514.42 kB). No cloud write, drain
-loop, or UI changed at any point.)
+(Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
+`src/sync/drainSync.ts`, `src/store/SyncEngineContext.tsx`, and `src/components/SyncStatusPanel.tsx`
+are genuinely imported by the shipped app for the first time, and Phase 5B3A's previously-dead
+`createX`/`updateXGuarded` functions become reachable for the first time too. Grew again to 524.07
+kB with the Risk 1/Risk 2 correction above — the new duplicate-resolution and account-linking-gate
+logic. Cloud writes are now live for signed-in, *linked* ordinary edits — the first phase where
+that is true.)
 
 ## Lint
 
 ```
-npm run lint — 0 errors (3 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, and CloudSyncContext.tsx — all context+provider files by design)
+npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design)
 ```

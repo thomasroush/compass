@@ -192,15 +192,23 @@ describe('AppContext dispatch wrapper — generation invalidation', () => {
     expect(generationInvalidateSpy).not.toHaveBeenCalled();
   });
 
-  it('invalidates the generation when the authenticated account actually changes', () => {
+  it('does not invalidate the generation on sign-in (nothing was running while signed out, so there is nothing to protect against)', () => {
     renderApp();
     generationInvalidateSpy.mockClear();
 
     signIn('user-1');
-    expect(generationInvalidateSpy).toHaveBeenCalledTimes(1);
+
+    expect(generationInvalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the generation when switching to a different authenticated account', () => {
+    renderApp();
+    signIn('user-1');
+    generationInvalidateSpy.mockClear();
 
     signIn('user-2');
-    expect(generationInvalidateSpy).toHaveBeenCalledTimes(2);
+
+    expect(generationInvalidateSpy).toHaveBeenCalledTimes(1);
   });
 
   it('invalidates the generation on sign-out', () => {

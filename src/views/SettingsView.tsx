@@ -5,6 +5,7 @@ import { parseJsonAppData } from '../storage/validation';
 import { clearAppData, flushSave } from '../storage/storage';
 import { AccountPanel } from '../components/AccountPanel';
 import { MigrationPanel } from '../components/MigrationPanel';
+import { SyncStatusPanel } from '../components/SyncStatusPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { STORAGE_KEY } from '../types';
 
@@ -73,6 +74,7 @@ export function SettingsView() {
 
       <AccountPanel />
       <MigrationPanel />
+      <SyncStatusPanel />
 
       <section className="section settings-section">
         <h2>Data storage</h2>

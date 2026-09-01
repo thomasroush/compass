@@ -55,17 +55,15 @@ describe('CloudSyncBanner', () => {
     expect(screen.getByRole('status').textContent).toBe('Automatic syncing is paused until that is resolved.');
   });
 
-  it('shows the local-only-edits safeguard after a hydration', () => {
+  it('shows a one-time notice after a hydration, with no stale "local only" claim now that cloud writes are active', () => {
     renderWithSync(state({ status: 'hydrated' }));
     const notice = screen.getByRole('status');
-    expect(notice.textContent).toMatch(/Loaded your account's data onto this device/);
-    expect(notice.textContent).toMatch(/cloud sync writes are not active yet/);
+    expect(notice.textContent).toMatch(/Loaded your account.s data onto this device/);
+    expect(notice.textContent).not.toMatch(/cloud sync writes are not active yet/);
   });
 
-  it('shows the local-only-edits safeguard while up to date, without repeating the "loaded" phrase', () => {
-    renderWithSync(state({ status: 'up-to-date' }));
-    const notice = screen.getByRole('status');
-    expect(notice.textContent).not.toMatch(/Loaded your account's data/);
-    expect(notice.textContent).toMatch(/cloud sync writes are not active yet/);
+  it('renders nothing while up to date (write-sync status is shown separately, in Settings)', () => {
+    const { container } = renderWithSync(state({ status: 'up-to-date' }));
+    expect(container.textContent).toBe('');
   });
 });

@@ -158,7 +158,7 @@ describe('CloudSyncProvider', () => {
     expect(metadata.records.dailyNote['note-1']?.lastKnownUpdatedAt).toBe('2026-08-30T01:00:00.000Z');
   });
 
-  it('does nothing when both cloud and local are empty', async () => {
+  it('does nothing to local data when both cloud and local are empty, but does mark this device linked (nothing exists to conflict)', async () => {
     renderApp();
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
     signIn('user-1');
@@ -166,6 +166,13 @@ describe('CloudSyncProvider', () => {
     await waitFor(() => expect(projectsRepo.listProjects).toHaveBeenCalled());
     expect(screen.getByTestId('status').textContent).toBe('idle');
     expect(screen.getByTestId('project-count').textContent).toBe('0');
+
+    // Risk 2 (Phase 5B3B account-linking gate): both-empty is one of the
+    // plan's approved link decisions — there is nothing on either side that
+    // could conflict, so it's safe to mark this device established
+    // immediately rather than leaving a brand-new account stuck unable to
+    // auto-sync until it happens to run a migration with something in it.
+    expect(getAccountMetadata(loadSyncMetadataStore(), 'user-1').established).toBe(true);
   });
 
   it('reports a recoverable error and leaves local data untouched when the cloud read fails', async () => {

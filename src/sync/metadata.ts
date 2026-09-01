@@ -118,6 +118,26 @@ export function clearDirty(metadata: AccountSyncMetadata, entity: SyncEntity, id
   };
 }
 
+/**
+ * Clears every pending dirty id for this account, across all entities.
+ * Phase 5B3B: used only for RESET and IMPORT, which wholesale-replace local
+ * state — whatever was previously dirty no longer corresponds to anything
+ * the (new) local state actually holds, so there is nothing meaningful left
+ * to push for those old ids. Never used for ordinary sync completion (that
+ * goes through `clearDirty`, one confirmed id at a time).
+ */
+export function clearAllDirty(metadata: AccountSyncMetadata): AccountSyncMetadata {
+  return { ...metadata, dirty: { project: [], task: [], dailyNote: [] } };
+}
+
+export function hasDirtyWork(metadata: AccountSyncMetadata): boolean {
+  return SYNC_ENTITIES.some((entity) => metadata.dirty[entity].length > 0);
+}
+
+export function countDirty(metadata: AccountSyncMetadata): number {
+  return SYNC_ENTITIES.reduce((sum, entity) => sum + metadata.dirty[entity].length, 0);
+}
+
 export function isDirty(metadata: AccountSyncMetadata, entity: SyncEntity, id: string): boolean {
   return metadata.dirty[entity].includes(id);
 }

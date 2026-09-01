@@ -2,7 +2,7 @@
 
 This plan governs adding authenticated cloud sync to Daily Compass via Supabase. It supersedes any earlier, undocumented assumption that a personal Supabase project would not need authentication — see `AGENTS.md` → "Cloud Sync (Supabase)" for the permanent rules this plan must satisfy.
 
-Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for two purposes — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31), and Phase 5B2's read-only cloud hydration — while still making no cloud write outside of those two explicit, narrow paths. Phase 5B (two-way synchronization) is staged as 5B1–5B3 under its own approved architecture decisions; 5B1 (internal foundations only, no user-visible change) and 5B2 (signed-in cloud hydration, read-only) are both complete. 5B3 was revised (see decisions 13–15 and the "Phase 5B3" section below) into 5B3A/5B3B/5B3C; 5B3A is now complete (all three tasks — account-affinity primitive, `expectedAccountId` required on every mutating repository function, and the dirty-tracking/generation scaffold — all inert or in-memory-only, no cloud write activated beyond Phase 5A's existing migration path) and 5B3B, 5B3C, and Phases 6–7 are still just described below.
+Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for three purposes — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31); Phase 5B2's read-only cloud hydration; and, as of Phase 5B3B, automatic account-bound write-back of ordinary signed-in edits. Phase 5B (two-way synchronization) is staged as 5B1–5B3 under its own approved architecture decisions; 5B1 (internal foundations), 5B2 (signed-in cloud hydration, read-only), and 5B3A (account-affinity/provenance/dirty-tracking foundations) are all complete. 5B3 was revised (see decisions 13–15 and the "Phase 5B3" section below) into 5B3A/5B3B/5B3C; **5B3B (automatic cloud write-back) is now complete** — real cloud writes are live for signed-in ordinary edits, durably tracked, account-bound, and generation-guarded. 5B3C (interactive linking UI, signed-in Import cloud-push) and Phases 6–7 are still just described below. Login gating and startup cloud-hydration changes remain explicitly out of scope through 5B3B — see `BUILD_STATUS.md` → "Phase 5B3B".
 
 ## Guiding constraints (apply to every phase)
 
@@ -354,20 +354,48 @@ sign-out, since rushing a best-effort write at that exact moment would reintrodu
 of race this design removes. A queued write's completion always updates its *own* account's sync
 metadata bucket, never whichever account happens to be active when the response arrives.
 
-#### Phase 5B3B — Manual "Sync now" write-back (not started)
+#### Phase 5B3B — Account-bound cloud write-back (complete)
 
-Implements the drain loop body against 5B3A's scaffold: for each dirty id under a given account,
-call the matching `*Guarded` function with `expectedAccountId` pinned to that account's bucket and
-`expectedUpdatedAt` from sync metadata; success clears dirty and updates metadata, a `'conflict'`
-leaves it dirty (cloud wins, matching the existing conflict philosophy). Wires the loop to the
-manual "Sync now" action (decision 7) and to startup/sign-in once a device is established. Adds a
-brief "reconciling account" interstitial disabling edits between an auth account change and its
-corresponding hydration/linking decision resolving, now load-bearing since write-back is live.
-Tests deliberately switch sessions immediately before and during a queued write (mocking the
-Supabase client to swap the resolved session inside the guard's own `await`) to confirm the write
-is still attributed to the account it was queued for, never silently dropped, and never
-cross-attributed to a different account — and that two accounts' dirty queues on one device never
-cross-contaminate through a shared drain loop.
+Implements the drain loop body against 5B3A's scaffold, largely as originally sketched below with
+two deliberate scope decisions made explicit by the session that built it — see `BUILD_STATUS.md`
+→ "Phase 5B3B" for full file-by-file detail:
+
+- For each dirty id under a given account, calls the matching account-scoped repository function —
+  `createX` when no cloud version is yet known, `updateXGuarded` with `expectedAccountId` pinned to
+  that account's bucket and `expectedUpdatedAt` from sync metadata otherwise. Success durably clears
+  dirty and advances metadata; a `'conflict'` leaves it dirty and does not advance the known
+  `updated_at` (cloud wins, matching the existing conflict philosophy — never an unconditional
+  overwrite, per decision 15). A `createX` failure classified as a typed `'duplicate'`
+  `RepositoryErrorType` (Postgres's own `23505` code, not a message match) re-reads the existing
+  cloud row and compares its actual content to the local record: identical content (the realistic
+  "create succeeded but the response was lost" case, e.g. a record already pushed by Phase 5A
+  migration before this device learned its cloud version) is safely recognized as synced; different
+  content stays dirty and reports a `'conflict'` without ever adopting the discovered timestamp as
+  license for a future guarded overwrite — a correctness gap in an earlier pass of this phase, found
+  and fixed before commit (see `BUILD_STATUS.md`'s "Correction" note under Phase 5B3B).
+- Wired to run **automatically** after a signed-in dirty-producing edit and once an authenticated
+  session becomes available, in addition to the manual "Sync now" action (decision 7) — broader than
+  this section's original "manual... write-back" framing, per this session's explicit instruction to
+  implement the complete write-back stage rather than a manual-only fragment. Single-flight and a
+  bounded exponential-backoff retry (documented in `BUILD_STATUS.md`) prevent overlapping drains and
+  unbounded rapid retries. **Gated on this device being linked to the signed-in account** — reusing
+  `AccountSyncMetadata.established` (set by a verified-successful Phase 5A migration or by Phase
+  5B2 hydration's `'hydrate-from-cloud'`/`'both-empty'` decisions) — added in the same correction as
+  the duplicate-create fix above, after review found the original draining unconditionally on
+  sign-in was itself a decision-9 violation (signing in alone is not authorization to treat existing
+  local data as belonging to the account).
+- **Deliberately not built**, per this session's explicit scope: the "reconciling account"
+  interstitial disabling edits between an auth change and a hydration/linking decision (that is
+  login-gating/UI-flow work the session excluded, deferred alongside 5B3C's linking UI it would
+  depend on) and any change to startup cloud hydration itself beyond the `'both-empty'` linking
+  addition above (5B2's hydration flow is otherwise untouched).
+- Tests confirm a write is always attributed to the account it was queued for (every repository call
+  asserted with the exact `expectedAccountId`), that generation/account checks stop a pass promptly
+  on sign-out/switch/`RESET`/`IMPORT`/teardown without cross-attributing to a different account, and
+  that two accounts' durable dirty buckets never cross-contaminate (each account has its own bucket
+  in `daily-compass-sync-v1`, and a drain for one account only ever reads/writes that account's
+  bucket) — matching this section's original testing intent, implemented against the real
+  `drainDirtyWork`/`SyncEngineContext` rather than a lower-level session-swap simulation.
 
 #### Phase 5B3C — Interactive linking UI and signed-in Import cloud-push (not started)
 
@@ -404,14 +432,14 @@ to test meaningfully.
 | Phase | Status |
 |---|---|
 | 1. Supabase client connection | Complete |
-| 2. Database schema and Row Level Security | Applied (Postgres 17.6 confirmed; RLS/policy inventory verified against all three tables). Manual cross-account verification (as a second test account) reviewed and documented but deliberately not yet executed — deferred until immediately before Phase 5B3B activates real writes, see Phase 2 above |
+| 2. Database schema and Row Level Security | Applied (Postgres 17.6 confirmed; RLS/policy inventory verified against all three tables). Manual cross-account verification (as a second test account) reviewed and documented but **deliberately still not executed**, even now that 5B3B has activated real automatic writes — remains a required manual, out-of-session step, see Phase 2 above |
 | 3. Authentication and login interface | Complete, including manual end-to-end verification on localhost and production Vercel (real confirmation email, sign-in/out, real recovery email) |
-| 4. Cloud repository / synchronization layer | Repository layer (typed CRUD + mapping, tested, plus Phase 5A's `upsertX` additions) complete and now activated (Settings → migration; Phase 5B2 → read-only hydration). Two-way (write) synchronization logic not started |
+| 4. Cloud repository / synchronization layer | Repository layer (typed CRUD + mapping, tested, plus Phase 5A's `upsertX` additions) complete and now activated for migration, read-only hydration, and — as of 5B3B — automatic write-back |
 | 5A. Controlled, explicit local-to-cloud migration | Complete, including manual verification against the production Supabase project (2026-08-31) — see `BUILD_STATUS.md` |
 | 5B1. Synchronization foundations (metadata, hydration-decision logic, guarded-update primitives) | Complete — internal only, inactive, no visible app change. See `BUILD_STATUS.md` |
 | 5B2. Signed-in cloud hydration | Complete — read-only; no cloud write activated. First activation of `src/sync/` in the shipped app. Manual verification against the production project still outstanding — see `BUILD_STATUS.md`. A follow-up fix (commit `bf7d967`) closed a related gap at the reducer level — see `BUILD_STATUS.md` → "Phase 5B2 correction" |
-| 5B3A. Account-affinity + mutation-provenance foundations | **Complete** (all three tasks) — `getAuthenticatedSessionFor` account-affinity primitive; `expectedAccountId` required on every mutating repository function including `upsert*`; `ACTION_PROVENANCE` classification, in-memory dirty-marking, and the generation/cancellation scaffold wired into `AppContext.tsx`'s dispatch. `create*`/`update*`/`*Guarded`/`delete*` still have zero application callers; `upsert*` (via Phase 5A's migration) and the new dispatch-wrapper machinery are the only live code paths, and neither makes a cloud write beyond what Phase 5A already did. Bundle: 510.13 kB → 510.78 kB (task 2) → 514.42 kB (task 3, including its cascading-mutation correction) — see `BUILD_STATUS.md` |
-| 5B3B. Manual "Sync now" write-back | Not started |
+| 5B3A. Account-affinity + mutation-provenance foundations | **Complete** (all three tasks) — `getAuthenticatedSessionFor` account-affinity primitive; `expectedAccountId` required on every mutating repository function including `upsert*`; `ACTION_PROVENANCE` classification and the generation/cancellation scaffold wired into `AppContext.tsx`'s dispatch (dirty-marking made durable in 5B3B). Bundle: 510.13 kB → 510.78 kB (task 2) → 514.42 kB (task 3) — see `BUILD_STATUS.md` |
+| 5B3B. Account-bound cloud write-back | **Complete** — durable, account-bound dirty tracking; single-flight, generation-guarded drain loop with bounded backoff; automatic sync after signed-in edits and on session-available, plus manual "Sync now"; minimal status UI in Settings, including an `'unlinked'` state. Gated on this device being linked to the account (reused `established` flag) — added along with a typed, content-verified duplicate-create resolution after a pre-acceptance review found both were needed. Bundle: 514.42 kB → 524.07 kB. Login gating, startup hydration changes, and Realtime explicitly out of scope — see `BUILD_STATUS.md` → "Phase 5B3B" |
 | 5B3C. Interactive linking UI + signed-in Import cloud-push | Not started |
 | 6. Cross-device, security, offline, and conflict testing | Not started |
 | 7. Vercel environment configuration and deployment verification | Env vars added and production rebuilt, redirect behavior confirmed working (done as part of Phase 3's manual verification). Confirming ordinary redeployments don't affect existing data still outstanding |

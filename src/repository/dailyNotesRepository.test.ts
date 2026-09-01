@@ -153,7 +153,7 @@ describe('createDailyNote', () => {
     });
   });
 
-  it('surfaces a duplicate-date failure (unique (user_id, note_date)) as a typed error', async () => {
+  it('surfaces a duplicate-date failure (unique (user_id, note_date)) without a code as a generic typed error', async () => {
     signIn();
     from.mockReturnValue(
       makeBuilder({
@@ -164,6 +164,19 @@ describe('createDailyNote', () => {
     const result = await createDailyNote(sampleNote, 'user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('database');
+  });
+
+  it('classifies a unique-violation (Postgres code 23505) as a typed duplicate error, not a generic database error', async () => {
+    signIn();
+    from.mockReturnValue(
+      makeBuilder({
+        data: null,
+        error: { message: 'duplicate key value violates unique constraint "daily_notes_pkey"', code: '23505' },
+      }),
+    );
+    const result = await createDailyNote(sampleNote, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('duplicate');
   });
 
   it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
