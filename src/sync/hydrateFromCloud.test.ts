@@ -50,6 +50,17 @@ function populatedLocal(): AppData {
   return { ...createEmptyAppData(), projects: [project], tasks: [task], dailyNotes: [note] };
 }
 
+/**
+ * `DailyNotesView` autosaves a placeholder note (blank `morning`/`evening`)
+ * purely from being visited — its debounce effect fires on mount regardless
+ * of whether the user typed anything, and `UPSERT_DAILY_NOTE` creates a
+ * record even when both fields are empty strings. This is visually
+ * indistinguishable from "no note" in the app.
+ */
+function blankNote(overrides: Partial<DailyNote> = {}): DailyNote {
+  return { id: 'blank-note-1', date: '2026-08-31', morning: '', evening: '', ...overrides };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -120,6 +131,87 @@ describe('hydrateFromCloud', () => {
     const result = await hydrateFromCloud(populatedLocal(), 'signedIn', false);
 
     expect(result.decision).toEqual({ kind: 'require-explicit-choice' });
+    expect(result.hydrated).toBeUndefined();
+  });
+
+  it('regression (production phone bug): hydrates from cloud when the only local record is a blank auto-saved daily note, even though local.dailyNotes is non-empty', async () => {
+    // Reproduces the reported phone scenario: the app is visibly empty (no
+    // projects, no tasks, no visible note content), but a residual blank
+    // daily-note record — created merely by having visited Daily Notes —
+    // still sits in local.dailyNotes. Before the fix, countLocalData's raw
+    // array length made this look "populated," so a signed-in phone with
+    // real cloud data (4 projects / 9 tasks / 3 notes) was wrongly told to
+    // require-explicit-choice instead of safely hydrating.
+    const phoneLocal: AppData = { ...createEmptyAppData(), dailyNotes: [blankNote()] };
+
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject(), cloudProject({ id: 'proj-2' })]));
+    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+
+    const result = await hydrateFromCloud(phoneLocal, 'signedIn', false);
+
+    expect(result.decision).toEqual({ kind: 'hydrate-from-cloud' });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0 });
+    expect(result.hydrated).toBeDefined();
+    expect(result.hydrated?.appData.projects).toHaveLength(2);
+  });
+
+  it('still requires an explicit choice when the local daily note actually has content, even if morning or evening alone is blank', async () => {
+    // Guards against over-correcting: a note with real content in only one
+    // field is still meaningful, user-entered data and must continue to
+    // block an unattended overwrite exactly as before this fix.
+    const morningOnly: AppData = {
+      ...createEmptyAppData(),
+      dailyNotes: [blankNote({ id: 'n1', morning: 'Went for a run', evening: '' })],
+    };
+
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+
+    const result = await hydrateFromCloud(morningOnly, 'signedIn', false);
+
+    expect(result.decision).toEqual({ kind: 'require-explicit-choice' });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 1 });
+    expect(result.hydrated).toBeUndefined();
+  });
+
+  it('a whitespace-only note is still treated as blank, not meaningful content', async () => {
+    const whitespaceOnly: AppData = {
+      ...createEmptyAppData(),
+      dailyNotes: [blankNote({ morning: '   ', evening: '\n\t ' })],
+    };
+
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+
+    const result = await hydrateFromCloud(whitespaceOnly, 'signedIn', false);
+
+    expect(result.decision).toEqual({ kind: 'hydrate-from-cloud' });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0 });
+  });
+
+  it('does not weaken protection: a real archived task still counts as populated local data and blocks hydration', async () => {
+    // Archived tasks are hidden from the default views by a UI filter, not
+    // actually empty — ADD_TASK never creates a blank-titled task, so an
+    // archived task always carries a real, user-entered title. Excluding it
+    // from the "meaningful" count (the way blank notes are excluded) would
+    // let a real archived task be silently destroyed by a hydrate-from-cloud
+    // LOAD, which is exactly the kind of data loss this fix must not permit.
+    const archivedOnly: AppData = {
+      ...createEmptyAppData(),
+      tasks: [{ ...task, archived: true }],
+    };
+
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+
+    const result = await hydrateFromCloud(archivedOnly, 'signedIn', false);
+
+    expect(result.decision).toEqual({ kind: 'require-explicit-choice' });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 1, dailyNotes: 0 });
     expect(result.hydrated).toBeUndefined();
   });
 

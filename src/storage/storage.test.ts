@@ -124,6 +124,71 @@ describe('daily notes', () => {
     });
     expect(getDailyNoteForDate(state.dailyNotes, '2026-08-28')?.evening).toBe('Updated');
   });
+
+  it('does not create a record for a blank upsert with no existing note (e.g. visiting Daily Notes without typing)', () => {
+    const before = createEmptyAppData();
+    const state = appReducer(before, {
+      type: 'UPSERT_DAILY_NOTE',
+      date: '2026-08-31',
+      morning: '',
+      evening: '',
+    });
+
+    expect(state).toBe(before);
+    expect(getDailyNoteForDate(state.dailyNotes, '2026-08-31')).toBeUndefined();
+    expect(state.dailyNotes).toHaveLength(0);
+  });
+
+  it('does not create a record for a whitespace-only upsert with no existing note', () => {
+    const before = createEmptyAppData();
+    const state = appReducer(before, {
+      type: 'UPSERT_DAILY_NOTE',
+      date: '2026-08-31',
+      morning: '   ',
+      evening: '\n\t ',
+    });
+
+    expect(state).toBe(before);
+    expect(state.dailyNotes).toHaveLength(0);
+  });
+
+  it('still creates a record normally when the upsert has real content', () => {
+    const state = appReducer(createEmptyAppData(), {
+      type: 'UPSERT_DAILY_NOTE',
+      date: '2026-08-31',
+      morning: 'Went for a run',
+      evening: '',
+    });
+
+    const note = getDailyNoteForDate(state.dailyNotes, '2026-08-31');
+    expect(note).toBeDefined();
+    expect(note?.morning).toBe('Went for a run');
+    expect(note?.evening).toBe('');
+  });
+
+  it('still allows clearing an existing note back to blank, without restoring or deleting it', () => {
+    let state = appReducer(createEmptyAppData(), {
+      type: 'UPSERT_DAILY_NOTE',
+      date: '2026-08-31',
+      morning: 'Went for a run',
+      evening: 'Read a book',
+    });
+    expect(state.dailyNotes).toHaveLength(1);
+
+    state = appReducer(state, {
+      type: 'UPSERT_DAILY_NOTE',
+      date: '2026-08-31',
+      morning: '',
+      evening: '',
+    });
+
+    // The existing record is updated in place (cleared), not deleted and not
+    // left holding its old text.
+    expect(state.dailyNotes).toHaveLength(1);
+    const note = getDailyNoteForDate(state.dailyNotes, '2026-08-31');
+    expect(note?.morning).toBe('');
+    expect(note?.evening).toBe('');
+  });
 });
 
 describe('export and import', () => {

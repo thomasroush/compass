@@ -1,8 +1,7 @@
-import type { AppData } from '../types';
+import type { AppData, DailyNote } from '../types';
 import { listDailyNotes } from '../repository/dailyNotesRepository';
 import { listProjects } from '../repository/projectsRepository';
 import { listTasks } from '../repository/tasksRepository';
-import { countLocalData } from '../repository/migration';
 import type { CloudDailyNote, CloudProject, CloudTask } from '../repository/types';
 import { decideHydration, type EntityCounts, type HydrationDecision } from './hydration';
 
@@ -44,6 +43,42 @@ function stripUpdatedAt<T extends { updatedAt: string }>(record: T): Omit<T, 'up
   return rest;
 }
 
+function isMeaningfulDailyNote(note: DailyNote): boolean {
+  return note.morning.trim() !== '' || note.evening.trim() !== '';
+}
+
+/**
+ * Local counts for the hydration decision, not the raw record counts Phase
+ * 5A's migration display uses (`countLocalData` in `repository/migration.ts`
+ * — left untouched, since a blank note is still harmless to *offer* to
+ * migrate under an explicit, user-confirmed action).
+ *
+ * `DailyNotesView` autosaves a placeholder daily-note record (blank
+ * `morning`/`evening`) purely from visiting the page — its debounce effect
+ * fires on mount regardless of whether the user typed anything, and the
+ * reducer's `UPSERT_DAILY_NOTE` creates a new record even when both fields
+ * are empty strings. That record is indistinguishable from "no note" in the
+ * UI and carries no content, so on its own it must not make this device
+ * look "populated" and block a safe, unattended cloud pull (`LOAD` replaces
+ * local state entirely — see `decideHydration`'s `hydrate-from-cloud` case
+ * — so getting this wrong in the other direction, by undercounting real
+ * data, would silently destroy it).
+ *
+ * Projects and tasks have no equivalent loophole: `ADD_PROJECT`/`ADD_TASK`
+ * both refuse to create a record with a blank, trimmed-empty name/title, so
+ * every project/task that exists has real user-entered content and is
+ * counted as-is — archived tasks included. An archived task still holds a
+ * real title; it is only hidden from the default view by a filter, not
+ * actually empty, so excluding it would risk a genuine, silent data loss.
+ */
+function meaningfulLocalCounts(local: AppData): EntityCounts {
+  return {
+    projects: local.projects.length,
+    tasks: local.tasks.length,
+    dailyNotes: local.dailyNotes.filter(isMeaningfulDailyNote).length,
+  };
+}
+
 /**
  * Reads this signed-in user's cloud projects/tasks/daily notes and decides
  * what, if anything, this device should do with them.
@@ -65,7 +100,7 @@ export async function hydrateFromCloud(
     return { decision: { kind: 'signed-out' } };
   }
 
-  const localCounts = countLocalData(local);
+  const localCounts = meaningfulLocalCounts(local);
 
   const [projectsResult, tasksResult, notesResult] = await Promise.all([
     listProjects(),

@@ -271,6 +271,9 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     case 'UPSERT_DAILY_NOTE': {
       const existing = state.dailyNotes.find((n) => n.date === action.date);
       if (existing) {
+        // Clearing an existing note back to blank is a legitimate edit and
+        // must stay possible here — only creating a new, still-blank record
+        // below is refused.
         return {
           ...state,
           dailyNotes: state.dailyNotes.map((n) =>
@@ -284,11 +287,19 @@ export function appReducer(state: AppData, action: AppAction): AppData {
           ),
         };
       }
+      const morning = action.morning ?? '';
+      const evening = action.evening ?? '';
+      // A blank/whitespace-only save with nothing to attach it to (e.g.
+      // DailyNotesView's autosave firing on mount before the user has typed
+      // anything) must not create a record — an empty note is indistinguishable
+      // from no note in the UI, so silently persisting one has no benefit and
+      // only pollutes local data (and, in turn, cloud-hydration decisions).
+      if (!morning.trim() && !evening.trim()) return state;
       const note: DailyNote = {
         id: crypto.randomUUID?.() ?? `${Date.now()}`,
         date: action.date,
-        morning: action.morning ?? '',
-        evening: action.evening ?? '',
+        morning,
+        evening,
       };
       return { ...state, dailyNotes: [...state.dailyNotes, note] };
     }
