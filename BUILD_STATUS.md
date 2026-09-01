@@ -107,18 +107,118 @@ Groundwork only, per the architecture decisions approved for Phase 5B (Supabase 
 
 **Risks and open questions carried into 5B2/5B3 (not resolved here):** whether local `Task`/`Project`/`DailyNote` types eventually need their own client-stamped field for the rare fully-offline concurrent-edit tie-break, given decision #3 rules out using the client clock for conflict decisions generally (the guarded update above relies entirely on the server's `updated_at`, which resolves the common case; a purely-offline double-edit on two never-yet-synced devices has no server timestamp to compare against and is explicitly out of scope here); how large `dirty`/`records` can grow before a bounded/pruning strategy is needed (not a concern yet since nothing writes to them); and the still-unresolved Phase 5A-era question of whether `AppContext` will eventually call cloud sync directly or through an intermediate layer (this phase adds `src/sync/` as that intermediate layer's home without yet deciding how `AppContext` will invoke it).
 
-### Phases 5B2–7 — not started (authenticated cloud writes, deletion/conflict/offline handling, cross-device/security/offline/conflict testing, remaining deployment verification)
+### Phase 5B2 — signed-in cloud hydration (complete; read-only, no cloud writes activated)
+
+Narrower than this phase's original description in `SUPABASE_IMPLEMENTATION_PLAN.md` (which
+anticipated wiring in the guarded-update functions here too): this slice is deliberately
+**read-only**. It activates `src/sync/` for the first time — the first code outside
+`src/sync/*.test.ts` to import from it — but only to decide whether it is safe to pull a
+signed-in user's cloud data into this device's local app state; it makes no cloud write of any
+kind. Wiring the guarded-update functions in for real two-way sync remains 5B3's job.
+
+- [x] `src/sync/hydrateFromCloud.ts` — the orchestrator. Given this device's current local
+  `AppData`, whether the user is signed in, and whether this device already has an established
+  sync link with that account (from `src/sync/metadata.ts`), it reads all three tables via the
+  existing `listProjects`/`listTasks`/`listDailyNotes` (Phase 4/5B1 — no new repository code),
+  computes cloud counts, and calls Phase 5B1's `decideHydration`. Only for the unambiguous
+  `hydrate-from-cloud` decision (cloud has data, local is empty) does it return app-shaped data
+  ready to load; every other decision returns no data, so a caller cannot accidentally apply one.
+  Like every function in `src/repository/`, it takes no user id parameter at all — the signed-in
+  user is resolved deep inside the repository layer from the live Supabase session, and this
+  function only ever sees the current session's own data.
+- [x] `src/store/CloudSyncContext.tsx` (`CloudSyncProvider`, via `src/store/useCloudSync.ts`) —
+  the only piece of the app that calls `hydrateFromCloud`. Runs once per sign-in (and once on
+  startup if already signed in), keyed on the authenticated user's id, gated on
+  `auth.status === 'ready'` and `isSupabaseConfigured`. Acts on the result:
+  - `hydrate-from-cloud`: dispatches the existing `LOAD` action into `AppContext` with the cloud
+    data, then updates **device-local sync metadata only** (`markEstablished`,
+    `setLastSyncedAt`, and `setRecordUpdatedAt` for every hydrated record, seeded from the
+    `updatedAt` the repository layer returned) and persists it via
+    `saveSyncMetadataStore`/`upsertAccountMetadata`. No Supabase call is made here — this is
+    exactly the "how is `expectedUpdatedAt` first populated" open question BUILD_STATUS flagged
+    for 5B1→5B2, answered without activating any write.
+  - `cloud-query-failed`: local data is left completely untouched; status becomes `'error'` with
+    the repository's own message, and a `retry()` re-runs the same attempt (exposed to
+    `CloudSyncBanner`'s Retry button).
+  - `require-explicit-choice` (both cloud and local have data, no established link — e.g. right
+    after a Phase 5A migration, before this device is marked established): local data is left
+    untouched; status becomes `'needs-choice'` with an explanatory message. Building the actual
+    choice UI is out of scope here (`SUPABASE_IMPLEMENTATION_PLAN.md` already flagged this as
+    undesigned) — this phase only guarantees it never guesses.
+  - `sync-established` (both sides have data and this device was already established by a prior
+    hydration): **not** re-hydrated automatically — re-pulling cloud data into local state on
+    every open without any write-back could silently discard local edits made since the last
+    hydration, which is exactly what "do not silently replace valid local data" rules out.
+    Status becomes `'up-to-date'`; real reconciliation is 5B3's job.
+  - `signed-out` / `both-empty` / `await-explicit-migration` (Phase 5A's existing migration
+    territory): status `'idle'`, no dispatch, nothing else changes.
+  - The effect is cancellation-guarded (`active` flag, matching `AuthContext`'s own pattern) so a
+    hydration in flight when the component unmounts or the user changes again never applies late.
+- [x] `src/components/CloudSyncBanner.tsx` — mounted once, globally, in `AppShell` (inside
+  `main-content`, above every route's content). Renders nothing while idle; a loading message; a
+  recoverable error with a Retry button; the needs-choice explanation; and — required by this
+  plan's Phase 5B decision 12 ("hydration and live write activation must land together... or a
+  prominent, visible safeguard") — a persistent notice shown whenever this device holds
+  cloud-hydrated data without active write-back (`'hydrated'` or `'up-to-date'` status): *"Changes
+  you make are saved on this device only — cloud sync writes are not active yet."* This is the
+  concrete answer to decision 12 for this slice: rather than delay hydration until writes exist,
+  hydration ships now with an always-visible safeguard.
+- [x] Wired into `src/App.tsx` as `<CloudSyncProvider>` between `AppProvider` and `BrowserRouter`
+  (it needs both `useApp()` and `useAuth()`, and both are already ancestors there).
+  `AppContext`'s reducer, save behavior, `MigrationPanel`, Import, and Reset are all unchanged;
+  Phase 5A's migration flow is untouched and still works exactly as before (including the
+  now-realistic case where migration already ran and hydration correctly reports
+  `require-explicit-choice` rather than re-uploading or re-downloading anything).
+- [x] Tests: `src/sync/hydrateFromCloud.test.ts` (9 tests, repository functions mocked, no live
+  network calls) — successful hydration with the cloud-only `updatedAt` correctly stripped from
+  the applied `AppData` but preserved in the raw records returned for metadata seeding; both-empty;
+  cloud-empty/local-populated (`await-explicit-migration`); both-populated without an established
+  link (`require-explicit-choice`) and with one (`sync-established`) never returning hydrated
+  data; a `database`-typed and an `unauthenticated`-typed repository failure both surfacing as
+  `cloud-query-failed` without touching local data; and a dedicated test asserting the function
+  takes no user-id parameter and never bleeds one mocked call's results into the next (stale/
+  cross-user prevention). `src/store/CloudSyncContext.test.tsx` (6 tests, RTL, `AuthProvider` +
+  `AppProvider` + `CloudSyncProvider` rendered together, Supabase auth and the three repository
+  list functions mocked) — signed-out stays idle and never calls a repository function; a full
+  successful hydration updates both `AppContext` state and device-local sync metadata
+  (established + per-record `updatedAt`); both-empty does nothing; a cloud failure reports the
+  error, leaves local data untouched, and Retry re-runs the attempt; both-populated/unestablished
+  requires a choice without changing local data; and — the explicit cross-account case — signing
+  into a second account on the same device, with the first account's data still local and no
+  established link for the second account, never silently swaps in the second account's cloud
+  data. `src/components/CloudSyncBanner.test.tsx` (6 tests) covers every status's rendered text,
+  including that the local-only-edits safeguard appears for both `'hydrated'` and `'up-to-date'`.
+  Total suite: 171 tests passing (up from 150 before this phase).
+- [x] Confirmed via `npm run build`: `dist/assets/index-*.js` grew from 503.40 kB to 509.90 kB —
+  expected and correct, since this is the first phase where `src/sync/` is actually imported by
+  the shipped app (every prior phase confirmed the opposite: byte-for-byte no change).
+
+**Not done in 5B2, by design/instruction:** no cloud write of any kind (no call to
+`updateProjectGuarded`/`updateTaskGuarded`/`updateDailyNoteGuarded`, no `createX`/`upsertX` beyond
+what Phase 5A's `MigrationPanel` already does); no "Sync now" manual action; no interactive
+resolution UI for `require-explicit-choice`; no re-hydration/reconciliation once a device is
+established; no per-record deletion/tombstones; no changes to the reducer, `storage.ts`,
+Export/Import/Reset, or `MigrationPanel`.
+
+**Manual verification still needed (cannot be done from this environment):** signing in with the
+real, already-migrated production account (which — per the 2026-08-31 Phase 5A verification note
+above — already has 4 projects, 9 tasks, and 3 daily notes in both places) and confirming the
+banner shows the `'needs-choice'` message rather than silently reloading anything; and, separately,
+creating a fresh test account with cloud data and an empty local browser profile to confirm the
+`'hydrated'` path actually loads real data end-to-end against the production Supabase project.
+
+### Phases 5B3–7 — not started (authenticated cloud writes, deletion/conflict/offline handling, cross-device/security/offline/conflict testing, remaining deployment verification)
 
 See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
 
-**Next recommended step:** finish Phase 2's manual cross-account verification (still outstanding), then build 5B2 (an orchestrator that actually calls `decideHydration` with real cloud/local counts, plus wiring the guarded-update functions into a small synchronization layer observing `AppContext` state) before Phase 6's cross-device/security/offline/conflict testing.
+**Next recommended step:** finish Phase 2's manual cross-account verification (still outstanding, independent of this work); manually verify 5B2 above against the production project; then build 5B3 — the interactive resolution for `require-explicit-choice`, a manual "Sync now" action, and wiring `updateProjectGuarded`/`updateTaskGuarded`/`updateDailyNoteGuarded` into a real write path — before Phase 6's cross-device/security/offline/conflict testing.
 
 ## Latest test results
 
 ```
 npm run test
-Test Files  18 passed (18)
-Tests       150 passed (150)
+Test Files  21 passed (21)
+Tests       171 passed (171)
 ```
 
 ## Latest build results
@@ -126,11 +226,11 @@ Tests       150 passed (150)
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-D18Xz1EY.js   503.40 kB
+dist/assets/index-CtXup8xf.js   509.90 kB
 ```
 
 ## Lint
 
 ```
-npm run lint — 0 errors (2 pre-existing warnings: react-refresh/only-export-components on AppContext.tsx and AuthContext.tsx, both context+provider files by design)
+npm run lint — 0 errors (3 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, and CloudSyncContext.tsx — all context+provider files by design)
 ```

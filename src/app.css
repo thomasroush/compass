@@ -461,6 +461,10 @@ a:focus-visible {
   color: var(--danger);
 }
 
+.cloud-sync-banner .cloud-sync-retry {
+  margin-left: 0.5rem;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;

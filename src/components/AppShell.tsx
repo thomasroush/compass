@@ -1,4 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import { CloudSyncBanner } from './CloudSyncBanner';
 import { PasswordRecoveryDialog } from './PasswordRecoveryDialog';
 import { QuickAddTask } from './QuickAddTask';
 
@@ -38,6 +39,7 @@ export function AppShell() {
         </header>
 
         <main className="main-content">
+          <CloudSyncBanner />
           <Outlet />
         </main>
 
