@@ -2,7 +2,7 @@
 
 This plan governs adding authenticated cloud sync to Daily Compass via Supabase. It supersedes any earlier, undocumented assumption that a personal Supabase project would not need authentication — see `AGENTS.md` → "Cloud Sync (Supabase)" for the permanent rules this plan must satisfy.
 
-Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for two purposes — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31), and Phase 5B2's read-only cloud hydration — while still making no cloud write outside of those two explicit, narrow paths. Phase 5B (two-way synchronization) is staged as 5B1–5B3 under its own approved architecture decisions; 5B1 (internal foundations only, no user-visible change) and 5B2 (signed-in cloud hydration, read-only) are both complete. 5B3 was revised (see decisions 13–15 and the "Phase 5B3" section below) into 5B3A/5B3B/5B3C; 5B3A's first, inert task is complete and the rest of 5B3A, 5B3B, 5B3C, and Phases 6–7 are still just described below.
+Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for two purposes — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31), and Phase 5B2's read-only cloud hydration — while still making no cloud write outside of those two explicit, narrow paths. Phase 5B (two-way synchronization) is staged as 5B1–5B3 under its own approved architecture decisions; 5B1 (internal foundations only, no user-visible change) and 5B2 (signed-in cloud hydration, read-only) are both complete. 5B3 was revised (see decisions 13–15 and the "Phase 5B3" section below) into 5B3A/5B3B/5B3C; 5B3A is now complete (all three tasks — account-affinity primitive, `expectedAccountId` required on every mutating repository function, and the dirty-tracking/generation scaffold — all inert or in-memory-only, no cloud write activated beyond Phase 5A's existing migration path) and 5B3B, 5B3C, and Phases 6–7 are still just described below.
 
 ## Guiding constraints (apply to every phase)
 
@@ -46,7 +46,7 @@ Tables (one per Compass entity, mirroring `src/types.ts` exactly): `public.proje
 
 **Design choices carried forward as-is:** `updated_at` on every table (still anticipatory input for the Phase 4 last-write-wins strategy — the current `Task`/`Project`/`DailyNote` TypeScript types don't yet have `updatedAt` fields; Phase 4 will need to decide whether to surface them client-side or let the DB trigger be the sole source of truth). `user_id` foreign keys to `auth.users` still cascade on delete so removing a Supabase user cleans up their rows.
 
-**Deliverables for this phase:** the migration file above reviewed, approved, and applied in the Supabase project (done — confirmed target Postgres version 17.6, well past the 15+ dependency for the tasks→projects `on delete set null (project_id)` clause). Confirmed by direct inspection that all three tables have RLS enabled and exactly four owner-only policies each, matching this file with no drift. **Still outstanding:** the manual verification pass (as a second, unrelated test account) confirming that account A cannot read, insert, update, or delete account B's rows, and that a signed-out request is rejected — not yet done, since no application code touches these tables until Phase 4. This should happen either directly (SQL editor/API, signed in as two different test accounts) or as part of exercising Phase 4's repository layer once it exists — either way, before Phase 4 is considered complete.
+**Deliverables for this phase:** the migration file above reviewed, approved, and applied in the Supabase project (done — confirmed target Postgres version 17.6, well past the 15+ dependency for the tasks→projects `on delete set null (project_id)` clause). Confirmed by direct inspection that all three tables have RLS enabled and exactly four owner-only policies each, matching this file with no drift. **Deliberately deferred, not merely outstanding (reviewed 2026-09-01):** the manual verification pass (as a second, unrelated test account) confirming that account A cannot read, insert, update, or delete account B's rows, and that a signed-out request is rejected. The procedure was reviewed and documented — a Supabase SQL-editor session simulating a second test account via `set local role authenticated; set local request.jwt.claim.sub = '<id>'`, plus a `set local role anon` signed-out check, needing no application code and no token handling — but has **not been executed** against the live project. It is intentionally scheduled for immediately before Phase 5B3B activates the first real automatic cloud write (not before Phase 4, and not now), since every cloud write remains either Phase 5A's explicit, manual, user-confirmed migration or fully inactive scaffolding (Phase 5B3A) through this point.
 
 ## Phase 3 — Authentication and login interface (complete)
 
@@ -321,12 +321,27 @@ so `vite build`'s bundle stays byte-for-byte identical throughout.
   exhaustiveness guard so a new action type added later without being classified fails the build —
   per decision 14. Wire `AppProvider`'s dispatch to call `markDirty` only for `'user-edit'`
   actions, against the currently authenticated account's `AccountSyncMetadata` bucket (a no-op
-  when signed out). **Not started.**
+  when signed out). **Complete** — see `BUILD_STATUS.md` → "Phase 5B3A, task 3 of 3" for full
+  detail. `src/sync/actionProvenance.ts` holds the classification and a `resolveDirtyTargets`
+  helper; `AppContext.tsx`'s dispatch wrapper calls both on every dispatch. Dirty marking is
+  in-memory only for this task (never persisted to `daily-compass-sync-v1`), and `LOAD`/
+  `APPLY_REMOTE_UPDATE` (the cloud/hydration paths) are excluded from dirty-marking by the static
+  classification itself, so they cannot create a feedback loop even once a drain loop exists.
+  `resolveDirtyTargets` also correctly marks every record whose *persisted* value a `'user-edit'`
+  action cascades into changing — not only the record it names — for the two cases where the
+  reducer actually does this: `REORDER_TASK`'s swap partner, and any task `enforcePrimaryCap`
+  demotes when `UPDATE_TASK`/`SET_PRIMARY` promotes a fourth task to Today-primary. Every other
+  user-edit action was reviewed and confirmed to never cascade beyond the record it names (see
+  `BUILD_STATUS.md`'s task 3 section for the field-by-field proof).
 - Add a sync-engine generation/cancellation scaffold (a monotonic counter bumped whenever the live
   `user.id` actually changes) that a later drain loop checks between — never during — network
   calls, so it stops starting new work promptly on sign-out/account switch without attempting to
   cancel a request already sent (see the in-flight-request analysis below). Stubbed with no drain
-  behavior yet. **Not started.**
+  behavior yet. **Complete** — see `BUILD_STATUS.md` → "Phase 5B3A, task 3 of 3". `src/sync/
+  generation.ts`'s `createSyncGeneration()` is wired into `AppContext.tsx`, invalidated on an
+  actual account-id change (covers sign-out and switching accounts), on `RESET`, on `IMPORT`, and
+  on `AppProvider` teardown — the four triggers this section calls for. Nothing yet calls
+  `current()`/`isCurrent()` for a real purpose, since no drain loop exists yet.
 
 **In-flight requests — what changing accounts can and cannot affect:** a request already sent
 cannot be un-sent, and Postgres RLS evaluates `auth.uid()` from the JWT actually attached to that
@@ -389,13 +404,13 @@ to test meaningfully.
 | Phase | Status |
 |---|---|
 | 1. Supabase client connection | Complete |
-| 2. Database schema and Row Level Security | Applied (Postgres 17.6 confirmed; RLS/policy inventory verified against all three tables). Manual cross-account verification (as a second test account) still outstanding — see Phase 2 above |
+| 2. Database schema and Row Level Security | Applied (Postgres 17.6 confirmed; RLS/policy inventory verified against all three tables). Manual cross-account verification (as a second test account) reviewed and documented but deliberately not yet executed — deferred until immediately before Phase 5B3B activates real writes, see Phase 2 above |
 | 3. Authentication and login interface | Complete, including manual end-to-end verification on localhost and production Vercel (real confirmation email, sign-in/out, real recovery email) |
 | 4. Cloud repository / synchronization layer | Repository layer (typed CRUD + mapping, tested, plus Phase 5A's `upsertX` additions) complete and now activated (Settings → migration; Phase 5B2 → read-only hydration). Two-way (write) synchronization logic not started |
 | 5A. Controlled, explicit local-to-cloud migration | Complete, including manual verification against the production Supabase project (2026-08-31) — see `BUILD_STATUS.md` |
 | 5B1. Synchronization foundations (metadata, hydration-decision logic, guarded-update primitives) | Complete — internal only, inactive, no visible app change. See `BUILD_STATUS.md` |
 | 5B2. Signed-in cloud hydration | Complete — read-only; no cloud write activated. First activation of `src/sync/` in the shipped app. Manual verification against the production project still outstanding — see `BUILD_STATUS.md`. A follow-up fix (commit `bf7d967`) closed a related gap at the reducer level — see `BUILD_STATUS.md` → "Phase 5B2 correction" |
-| 5B3A. Account-affinity + mutation-provenance foundations | In progress — `getAuthenticatedSessionFor` account-affinity primitive complete; `expectedAccountId` now required on every mutating repository function including `upsert*` (task 2 of 3 fully complete, no exception remaining) — `create*`/`update*`/`*Guarded`/`delete*` still have zero application callers, but `upsert*` now does via Phase 5A's migration, so the bundle grew slightly (510.13 kB → 510.78 kB) for the first time in this phase; `ACTION_PROVENANCE` dirty-marking and the sync-engine scaffold not yet started — see `BUILD_STATUS.md` |
+| 5B3A. Account-affinity + mutation-provenance foundations | **Complete** (all three tasks) — `getAuthenticatedSessionFor` account-affinity primitive; `expectedAccountId` required on every mutating repository function including `upsert*`; `ACTION_PROVENANCE` classification, in-memory dirty-marking, and the generation/cancellation scaffold wired into `AppContext.tsx`'s dispatch. `create*`/`update*`/`*Guarded`/`delete*` still have zero application callers; `upsert*` (via Phase 5A's migration) and the new dispatch-wrapper machinery are the only live code paths, and neither makes a cloud write beyond what Phase 5A already did. Bundle: 510.13 kB → 510.78 kB (task 2) → 514.42 kB (task 3, including its cascading-mutation correction) — see `BUILD_STATUS.md` |
 | 5B3B. Manual "Sync now" write-back | Not started |
 | 5B3C. Interactive linking UI + signed-in Import cloud-push | Not started |
 | 6. Cross-device, security, offline, and conflict testing | Not started |

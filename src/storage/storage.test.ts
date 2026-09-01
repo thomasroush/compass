@@ -191,6 +191,65 @@ describe('daily notes', () => {
   });
 });
 
+describe('reducer id pass-through and APPLY_REMOTE_UPDATE (Phase 5B3A scaffold)', () => {
+  it('ADD_TASK uses a caller-supplied id instead of generating one, when given', () => {
+    const state = appReducer(createEmptyAppData(), {
+      type: 'ADD_TASK',
+      id: 'preset-task-id',
+      title: 'Buy milk',
+    });
+    expect(state.tasks[0].id).toBe('preset-task-id');
+  });
+
+  it('ADD_TASK still generates its own id when none is supplied', () => {
+    const state = appReducer(createEmptyAppData(), { type: 'ADD_TASK', title: 'Buy milk' });
+    expect(state.tasks[0].id).toBeTruthy();
+  });
+
+  it('ADD_PROJECT uses a caller-supplied id instead of generating one, when given', () => {
+    const state = appReducer(createEmptyAppData(), {
+      type: 'ADD_PROJECT',
+      id: 'preset-project-id',
+      name: 'Home',
+    });
+    expect(state.projects[0].id).toBe('preset-project-id');
+  });
+
+  it('UPSERT_DAILY_NOTE uses a caller-supplied id for a new note, when given', () => {
+    const state = appReducer(createEmptyAppData(), {
+      type: 'UPSERT_DAILY_NOTE',
+      id: 'preset-note-id',
+      date: '2026-09-01',
+      morning: 'Plan',
+    });
+    expect(state.dailyNotes[0].id).toBe('preset-note-id');
+  });
+
+  it('UPSERT_DAILY_NOTE ignores a caller-supplied id when updating an existing note (keeps the existing id)', () => {
+    let state = appReducer(createEmptyAppData(), {
+      type: 'UPSERT_DAILY_NOTE',
+      id: 'first-id',
+      date: '2026-09-01',
+      morning: 'Plan',
+    });
+    state = appReducer(state, {
+      type: 'UPSERT_DAILY_NOTE',
+      id: 'a-different-id-that-should-be-ignored',
+      date: '2026-09-01',
+      evening: 'Review',
+    });
+    expect(state.dailyNotes).toHaveLength(1);
+    expect(state.dailyNotes[0].id).toBe('first-id');
+  });
+
+  it('APPLY_REMOTE_UPDATE replaces state wholesale, exactly like LOAD/IMPORT', () => {
+    const before = appReducer(createEmptyAppData(), { type: 'ADD_TASK', title: 'Local only' });
+    const remote = sampleData();
+    const state = appReducer(before, { type: 'APPLY_REMOTE_UPDATE', data: remote });
+    expect(state).toEqual(remote);
+  });
+});
+
 describe('export and import', () => {
   it('reproduces saved data', () => {
     const data = sampleData();

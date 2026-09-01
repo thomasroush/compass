@@ -42,7 +42,7 @@ Current status: app behavior and localStorage persistence are unchanged. No code
 - [x] `supabase/migrations/20260830120000_phase2_core_schema_and_rls.sql` has been executed against the Supabase project. `public.projects`, `public.tasks`, and `public.daily_notes` all exist, each with composite `(user_id, id)` primary keys, RLS enabled, and four separate owner-only policies (`select`/`insert`/`update`/`delete`, each scoped to `auth.uid() = user_id`).
 - [x] Confirmed the target Postgres version is 17.6 — well past the 15+ requirement the migration's column-specific `on delete set null (project_id)` clause depends on, so the tasks→projects foreign key applied as designed (detaches a deleted project's tasks without touching `user_id`).
 - [x] RLS inventory verified directly against the applied schema: all three tables have `rowsecurity = true` and exactly four policies each (owner-only, `to authenticated`), matching the migration file with no drift.
-- [ ] Not yet done: the manual cross-account verification pass (sign in as a second test account and confirm it cannot read/write the first account's rows, and that a signed-out request is rejected) called for in the plan's Phase 2 deliverables. No application code reads or writes these tables yet (that begins in Phase 4), so this check should happen either now via the Supabase SQL editor/API directly, or once Phase 4 adds a repository layer to exercise it end to end.
+- [ ] **Deliberately deferred, not merely outstanding (reviewed 2026-09-01):** the manual cross-account verification pass (sign in as a second test account and confirm it cannot read/write the first account's rows, and that a signed-out request is rejected) called for in the plan's Phase 2 deliverables. The procedure itself was reviewed and documented (a Supabase SQL-editor session, simulating a second test account via `set local role authenticated; set local request.jwt.claim.sub = '<id>'`, plus a `set local role anon` signed-out check — no application code needed, no token ever handled) but **has not been executed against the live project**. It is intentionally scheduled for immediately before Phase 5B3B activates the first real automatic cloud write, not before now, since no application code writes to these tables outside Phase 5A's explicit, manual migration and this task's dirty-tracking remains fully inactive (see Phase 5B3A task 3 below). Do not read this as "already performed" — it has not been.
 
 ### Phase 3 — Authentication and login interface (complete)
 
@@ -239,7 +239,7 @@ runs, not the account whose edit it actually was. The approved revision splits 5
 sub-phases — 5B3A (account-affinity + provenance foundations, inert), 5B3B (manual "Sync now"
 write-back, activated), 5B3C (interactive linking UI + signed-in Import cloud-push) — full
 rationale in `SUPABASE_IMPLEMENTATION_PLAN.md` → "Phase 5B3". This section tracks 5B3A's progress;
-5B3B and 5B3C are not started.
+5B3A is now complete (all three tasks); 5B3B and 5B3C are not started.
 
 #### Phase 5B3A, task 1 of 3 — `getAuthenticatedSessionFor` account-affinity primitive (complete; inert)
 
@@ -370,36 +370,190 @@ activated; migration's own behavior is unchanged, only *which account identity i
   path — `create*`/`update*`/`*Guarded`/`delete*` still have zero application callers, and
   migration's behavior, sequencing, UI, eligibility checks, and completion state are all unchanged.
 
+#### Phase 5B3A, task 3 of 3 — dirty-tracking and sync-engine generation/cancellation scaffold (complete; inactive)
+
+The last of 5B3A's three tasks: an exhaustive action-provenance classification, in-memory-only
+dirty marking wired into `AppProvider`'s dispatch, and an in-memory generation/cancellation
+counter. Lands the same way every other 5B3A piece did — built, wired to real dispatch (unlike
+tasks 1–2, this one genuinely runs on every dispatch now, not just an inert unused function), and
+tested — but produces **no cloud write of any kind**, no drain loop, no retry, no timer, no network
+call, and no UI change. `localStorage` persistence (`flushSave` on every state change) is completely
+unchanged and remains the sole thing that actually happens on a dispatch, behavior-wise.
+
+- [x] `src/sync/actionProvenance.ts` — `classifyActionProvenance(action): 'user-edit' | 'sync-boundary'`,
+  an exhaustive switch over every `AppAction['type']` with a `never`-typed `default` branch, so a
+  new action type added later without a case here fails the build (decision 14's compile-time
+  exhaustiveness guard). `ADD_TASK`/`UPDATE_TASK`/`COMPLETE_TASK`/`UNCOMPLETE_TASK`/`ARCHIVE_TASK`/
+  `SET_PRIMARY`/`POSTPONE_DUE`/`POSTPONE_TO_WEEK`/`REORDER_TASK`/`ADD_PROJECT`/`UPDATE_PROJECT`/
+  `UPSERT_DAILY_NOTE` are `'user-edit'`; `LOAD`/`IMPORT`/`RESET`/`APPLY_REMOTE_UPDATE` are
+  `'sync-boundary'`.
+- [x] `src/store/reducer.ts` — added `APPLY_REMOTE_UPDATE` (the fourth sync-boundary action decision
+  14 calls for, the future counterpart to `LOAD` for pulled-down reconciliation once Phase 5B3B's
+  drain loop exists; same "replace state wholesale" semantics as `LOAD`/`IMPORT`, not dispatched
+  from anywhere yet). Also added an optional `id?: string` to `ADD_TASK`/`ADD_PROJECT`/
+  `UPSERT_DAILY_NOTE` — when supplied, the reducer uses it instead of generating its own; when
+  omitted (every existing call site, unchanged), behavior is byte-for-byte identical to before.
+  This exists so `AppContext`'s dispatch wrapper can generate a record's id *before* dispatch and
+  use that same id both for what gets persisted and for what gets marked dirty, rather than calling
+  the reducer a second time to "peek" at a created id (which — a real bug caught during this task's
+  design, not shipped — would silently produce two different records, since `ADD_TASK`/
+  `ADD_PROJECT`/`UPSERT_DAILY_NOTE`'s id and timestamp generation is not actually a pure function of
+  their arguments alone).
+- [x] `src/sync/actionProvenance.ts` also exports `resolveDirtyTargets(action, prevState):
+  { entity: SyncEntity; id: string }[]` — resolves which record(s) a `'user-edit'` action should
+  mark dirty, using only the action's own fields (an id it already carries, or the id `AppContext`
+  pre-generated for a creation action) and a same-tick read of `prevState`, never the reducer and
+  never a before/after diff. Mirrors the reducer's own no-op guards (blank title/name/note content,
+  and — for every id-targeting action — the id must already exist in `prevState`) so a refused edit
+  is never marked dirty.
+- [x] `src/sync/generation.ts` — `createSyncGeneration()`: a tiny in-memory monotonic counter
+  (`current()`/`isCurrent(g)`/`invalidate()`). Stubbed — nothing calls `current()`/`isCurrent()` for
+  a real purpose yet; Phase 5B3B's drain loop is what will actually check it between network calls.
+- [x] `src/store/AppContext.tsx` — `AppProvider` now calls `useAuth()` (safe: `AuthProvider` already
+  wraps `AppProvider` in `App.tsx`, and the only other place `AppProvider` is rendered,
+  `CloudSyncContext.test.tsx`, already wraps it in `AuthProvider` too) and wraps `useReducer`'s raw
+  dispatch in a stable (`useCallback`, empty deps, state/account read via refs — matching
+  `CloudSyncContext`'s existing `stateRef` pattern so `dispatch`'s identity never changes) function
+  that, per dispatched action:
+  - Pre-generates an id for `ADD_TASK`/`ADD_PROJECT`/`UPSERT_DAILY_NOTE` when the caller didn't
+    supply one (every existing call site), via the same `generateId()` already exported from
+    `src/types.ts`, and injects it into the action before anything else runs.
+  - Classifies the action via `classifyActionProvenance`. For `'user-edit'`: if signed in
+    (`auth.isSupabaseConfigured ? auth.user?.id : null`, non-null), calls `resolveDirtyTargets` and
+    `markDirty` (from the existing `src/sync/metadata.ts`) against that account's
+    `AccountSyncMetadata` bucket in an **in-memory-only** `SyncMetadataStore` — never read from or
+    written to `daily-compass-sync-v1` here, starts empty every session, so it cannot drift from or
+    clobber what `CloudSyncContext`'s hydration flow separately persists there, and there is nothing
+    to lose by keeping it in-memory at this stage since nothing yet drains it. Signed out is a
+    structural no-op (the `if (currentAccountId)` guard, not a separate flag).
+  - For `'sync-boundary'` actions: never calls `markDirty` — `LOAD`/`APPLY_REMOTE_UPDATE` (the
+    cloud/hydration paths) are excluded from dirty-marking by construction, not by a runtime check,
+    so they cannot create a feedback loop (mark dirty → drain loop pushes it back → hydration pulls
+    it down → marked dirty again) even once a drain loop exists later.
+  - Additionally invalidates the generation counter for `RESET` and `IMPORT` specifically (not every
+    sync-boundary action — `LOAD`/`APPLY_REMOTE_UPDATE` are expected, first-class parts of the sync
+    system's own flow and must not cancel themselves).
+  - A separate `useEffect` keyed on the resolved account id invalidates the generation whenever it
+    actually changes (covers both sign-out, which changes it to `null`, and switching to a
+    different account) — skipping the initial mount so starting up already signed in isn't treated
+    as a spurious "change."
+  - A cleanup-only `useEffect` (empty deps) invalidates the generation on `AppProvider` teardown.
+- [x] Confirmed no application path calls a repository `create`/`update`/`delete`/`upsert` function
+  as a result of any of this — searched for new callers of those functions outside
+  `src/repository/*.ts`, `migration.ts`, and their tests; only Phase 5A's migration path exists, as
+  before. This task adds bookkeeping about *what would need to sync*, never a call that actually
+  syncs it.
+- [x] **Cascading-mutation correction (2026-09-01, before this task was ever committed):** the first
+  pass of this task shipped two documented imprecisions — `REORDER_TASK`'s swap partner and
+  `enforcePrimaryCap`'s demotions weren't separately marked dirty. Both are now fixed, in
+  `src/sync/actionProvenance.ts`:
+  - `REORDER_TASK` independently recomputes the reducer's own column/index/swap-partner logic
+    (reusing the already-exported `getTasksByStatus`, never the reducer itself) directly from
+    `prevState`, and marks both the acted-on task and its swap partner — or neither, when the
+    reorder is at a column boundary and the reducer itself would no-op.
+  - A new `primaryCapDemotions` helper reuses the reducer's own, now-exported `enforcePrimaryCap`
+    (a pure, side-effect-free function — reusing it is safe in a way calling `appReducer` itself
+    is not, since it generates no id or timestamp) against a shadow copy of `prevState.tasks` with
+    only the acted-on task's resulting `status`/`isPrimary`/`archived` patched in, and marks any
+    *other* task it demotes. Called only from `UPDATE_TASK` and `SET_PRIMARY`'s
+    "task not currently Today" branch — the only two paths that can ever *increase* the
+    Today-primary count (see the next bullet for why every other task action is provably safe
+    without this check).
+  - **Reviewed every user-edit action for other cascading changes; found none beyond these two.**
+    `COMPLETE_TASK`/`UNCOMPLETE_TASK`/`ARCHIVE_TASK`/`POSTPONE_DUE`/`POSTPONE_TO_WEEK` each delegate
+    to a fixed, hardcoded `UPDATE_TASK` payload that can only ever *remove* Today-primary status (or
+    leave it unchanged) from the one task they name, never grant it to that task or touch any
+    other — so none of them can trigger a demotion, by construction, not by observation. `ADD_TASK`
+    always creates with `isPrimary: false`. `ADD_PROJECT`/`UPDATE_PROJECT` never touch `state.tasks`
+    at all (project archival/completion does not cascade to its tasks in this reducer — there is no
+    project-deletion action client-side to raise the schema's `on delete set null` concern either).
+    `UPSERT_DAILY_NOTE` only ever touches the one note it names. This review is documented here so
+    it doesn't need re-deriving if `resolveDirtyTargets` is revisited later.
+  - Also fixed in the same pass: `SET_PRIMARY`'s exclusion rule now also refuses an archived target
+    task, matching the reducer's own `if (!task || task.archived) return state;` guard (the prior
+    version only checked existence, not archived status).
+- [x] Tests (59 new; suite total 261, up from 202): `src/sync/actionProvenance.test.ts` (38) —
+  every `AppAction` type's classification (including a test that the two lists partition all 16
+  current variants with no overlap and no gap), dirty-target resolution for every user-edit action
+  type (including the existing-note-reuses-its-own-id case for `UPSERT_DAILY_NOTE`), exclusion
+  rules (blank title/name/note content, a target id absent from `prevState`, every sync-boundary
+  action always resolving to no targets regardless of payload), and a dedicated cascading-changes
+  group: both sides of an adjacent reorder marked; the correct column-adjacent partner found even
+  when other-status tasks sit between the two in raw array order (proving the resolution isn't
+  relying on array adjacency); a boundary reorder (no partner) excluded; a plain primary selection
+  with no demotion needed; a fourth task promoted via `SET_PRIMARY` correctly demoting exactly the
+  highest-sortOrder existing primary (not the other two, and not itself a second time); the same
+  scenario reproduced via a direct `UPDATE_TASK` dispatch (proving the cascade isn't
+  `SET_PRIMARY`-specific plumbing); no extra demotion when the cap isn't exceeded; `SET_PRIMARY`
+  excluded at an already-full cap and on an archived task; and confirmation that
+  `COMPLETE_TASK`/`ARCHIVE_TASK`/a status-only `UPDATE_TASK` never mark a second task even when
+  other Today-primaries exist. `src/sync/generation.test.ts` (5) — starts at 0, `invalidate()`
+  increments and returns the new value, a captured generation is no longer current after
+  invalidation, monotonic across repeated invalidations, and two instances never interfere.
+  `src/store/AppContext.test.tsx` (10, RTL, new file, `markDirty`/`createSyncGeneration`
+  spy-wrapped over their real implementations so genuine behavior is preserved while calls are
+  observable) — signed-out dispatch never marks anything dirty; a signed-in `ADD_TASK` marks
+  exactly the id that actually lands in state dirty, once; `LOAD` never marks anything dirty even
+  though it replaces all of state; `RESET`/`IMPORT` each invalidate the generation once; `LOAD` and
+  an ordinary user edit do not; signing in, switching to
+  a second account, and signing out each invalidate the generation; unmounting invalidates the
+  generation. `src/storage/storage.test.ts` gained 6 cases for the reducer-level changes (a
+  caller-supplied id is used for `ADD_TASK`/`ADD_PROJECT`/`UPSERT_DAILY_NOTE` when given, `ADD_TASK`
+  still generates its own when not, an existing daily note keeps its own id rather than adopting a
+  caller-supplied one meant only for the create case, and `APPLY_REMOTE_UPDATE` replaces state
+  wholesale exactly like `LOAD`/`IMPORT`).
+- [x] Confirmed via `npm run build`: `dist/assets/index-*.js` grew from 510.78 kB to 514.42 kB —
+  expected, since this task's new modules (`src/sync/actionProvenance.ts`, `src/sync/generation.ts`)
+  are genuinely imported by the shipped app for the first time (via `AppContext.tsx`, which every
+  view already depends on), unlike tasks 1–2's previously-dead code becoming reachable. The
+  cascading-mutation correction above added further reachable code to
+  `src/sync/actionProvenance.ts` (up from 513.24 kB before that correction).
+- [ ] Not done (by design — deferred to 5B3B/5B3C, per the approved revision): no drain loop, no
+  retry/backoff, no timers, no network listeners, no "Sync now" UI, no cloud hydration change, no
+  sync-status UI beyond what `CloudSyncBanner` already showed before this task, no persistence of
+  dirty state to `daily-compass-sync-v1`, and — per this session's explicit instruction — the
+  Phase 2 manual cross-account RLS verification remains un-executed, deliberately scheduled for
+  immediately before 5B3B activates the first real write (see the Phase 2 section above).
+
 ### Phases 5B3B/5B3C, 6, 7 — not started
 
 See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
 
-**Next recommended step (subject to review of this slice):** finish Phase 2's manual cross-account verification (still outstanding, independent of this work); manually verify 5B2 above against the production project; then continue 5B3A — adding the `ACTION_PROVENANCE`-driven dirty-marking and the sync-engine generation/cancellation scaffold (task 3 of 3), still inert — before 5B3B activates any write. Task 2 of 3 is now fully complete, with no `upsert*` exception remaining.
+**Next recommended step (subject to review of this slice):** Phase 5B3A is now fully complete (all
+three tasks). Before 5B3B implements the actual drain-loop write-back, two things still need to
+happen: manually verify 5B2's hydration path against the production project (still outstanding,
+independent of this work), and execute the Phase 2 manual cross-account RLS verification that has
+been reviewed and documented but deliberately not yet run (see the Phase 2 section above) — this
+session's instruction was explicit that it stay deferred until immediately before 5B3B activates
+real writes, not to perform it now.
 
 ## Latest test results
 
 ```
 npm run test
-Test Files  23 passed (23)
-Tests       202 passed (202)
+Test Files  26 passed (26)
+Tests       261 passed (261)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
-`update*`/`*Guarded`/`delete*` scoped; 202 now that `upsert*` is scoped too and migration's tests
-were extended.)
+`update*`/`*Guarded`/`delete*` scoped; 202 once `upsert*` was scoped too and migration's tests were
+extended; 251 once Phase 5B3A task 3's provenance/dirty-marking/generation scaffold and its tests
+first landed; 261 now that the REORDER_TASK/enforcePrimaryCap cascading-mutation correction and its
+tests have landed, before task 3 was ever committed.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-CIBzSJyq.js   510.78 kB
+dist/assets/index-CCfS1VwY.js   514.42 kB
 ```
 
-(Grew from 510.13 kB — expected. `getAuthenticatedSessionFor`'s pinned-client construction logic,
-previously fully tree-shaken since nothing imported it, is now reachable from the shipped app via
-migration's `upsertX` calls; see the 5B3A task 2 section above. No other application behavior
-changed.)
+(Grew from 510.78 kB — expected. `src/sync/actionProvenance.ts` and `src/sync/generation.ts` are
+genuinely imported by the shipped app for the first time, via `AppContext.tsx`, which every view
+already depends on; see the 5B3A task 3 section above. The cascading-mutation correction added
+further reachable code to `actionProvenance.ts` (513.24 kB → 514.42 kB). No cloud write, drain
+loop, or UI changed at any point.)
 
 ## Lint
 

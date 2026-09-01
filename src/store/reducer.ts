@@ -71,7 +71,7 @@ export type TaskUpdate = Partial<
 
 export type AppAction =
   | { type: 'LOAD'; data: AppData }
-  | { type: 'ADD_TASK'; title: string; status?: TaskStatus; notes?: string; priority?: Priority; projectId?: string; dueDate?: string }
+  | { type: 'ADD_TASK'; id?: string; title: string; status?: TaskStatus; notes?: string; priority?: Priority; projectId?: string; dueDate?: string }
   | { type: 'UPDATE_TASK'; id: string; updates: TaskUpdate }
   | { type: 'COMPLETE_TASK'; id: string }
   | { type: 'UNCOMPLETE_TASK'; id: string }
@@ -80,17 +80,25 @@ export type AppAction =
   | { type: 'POSTPONE_DUE'; id: string; days?: number }
   | { type: 'POSTPONE_TO_WEEK'; id: string }
   | { type: 'REORDER_TASK'; id: string; direction: 'up' | 'down' }
-  | { type: 'ADD_PROJECT'; name: string; description?: string }
+  | { type: 'ADD_PROJECT'; id?: string; name: string; description?: string }
   | { type: 'UPDATE_PROJECT'; id: string; name?: string; description?: string; status?: Project['status'] }
-  | { type: 'UPSERT_DAILY_NOTE'; date: string; morning?: string; evening?: string }
+  | { type: 'UPSERT_DAILY_NOTE'; id?: string; date: string; morning?: string; evening?: string }
   | { type: 'IMPORT'; data: AppData }
-  | { type: 'RESET' };
+  | { type: 'RESET' }
+  /**
+   * Phase 5B3A scaffold (see SUPABASE_IMPLEMENTATION_PLAN.md "Phase 5B3A" and
+   * decision 14): the sync-boundary counterpart to LOAD for a future pulled-
+   * down reconciliation write, once a real drain loop exists (Phase 5B3B).
+   * Same "replace state with authoritative data" semantics as LOAD/IMPORT.
+   * Not dispatched from anywhere yet.
+   */
+  | { type: 'APPLY_REMOTE_UPDATE'; data: AppData };
 
 function updateTaskList(tasks: Task[], id: string, updater: (t: Task) => Task): Task[] {
   return tasks.map((t) => (t.id === id ? updater(t) : t));
 }
 
-function enforcePrimaryCap(tasks: Task[]): Task[] {
+export function enforcePrimaryCap(tasks: Task[]): Task[] {
   const primaries = getActiveTasks(tasks)
     .filter((t) => t.status === 'Today' && t.isPrimary)
     .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -109,7 +117,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     case 'ADD_TASK': {
       const status = action.status ?? 'Inbox';
       const task: Task = {
-        id: crypto.randomUUID?.() ?? `${Date.now()}`,
+        id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
         title: action.title.trim(),
         notes: action.notes?.trim() || undefined,
         status,
@@ -243,7 +251,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
       const name = action.name.trim();
       if (!name) return state;
       const project: Project = {
-        id: crypto.randomUUID?.() ?? `${Date.now()}`,
+        id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
         name,
         description: action.description?.trim() || undefined,
         status: 'active',
@@ -296,7 +304,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
       // only pollutes local data (and, in turn, cloud-hydration decisions).
       if (!morning.trim() && !evening.trim()) return state;
       const note: DailyNote = {
-        id: crypto.randomUUID?.() ?? `${Date.now()}`,
+        id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
         date: action.date,
         morning,
         evening,
@@ -309,6 +317,9 @@ export function appReducer(state: AppData, action: AppAction): AppData {
 
     case 'RESET':
       return { version: 1, tasks: [], projects: [], dailyNotes: [] };
+
+    case 'APPLY_REMOTE_UPDATE':
+      return action.data;
 
     default:
       return state;
