@@ -608,3 +608,21 @@ code {
     flex-direction: column;
   }
 }
+
+.auth-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.auth-gate-panel {
+  width: 100%;
+  max-width: 420px;
+}
+
+.auth-gate-panel .brand {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}

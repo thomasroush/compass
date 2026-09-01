@@ -2,7 +2,7 @@
 
 This plan governs adding authenticated cloud sync to Daily Compass via Supabase. It supersedes any earlier, undocumented assumption that a personal Supabase project would not need authentication — see `AGENTS.md` → "Cloud Sync (Supabase)" for the permanent rules this plan must satisfy.
 
-Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for three purposes — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31); Phase 5B2's read-only cloud hydration; and, as of Phase 5B3B, automatic account-bound write-back of ordinary signed-in edits. Phase 5B (two-way synchronization) is staged as 5B1–5B3 under its own approved architecture decisions; 5B1 (internal foundations), 5B2 (signed-in cloud hydration, read-only), and 5B3A (account-affinity/provenance/dirty-tracking foundations) are all complete. 5B3 was revised (see decisions 13–15 and the "Phase 5B3" section below) into 5B3A/5B3B/5B3C; **5B3B (automatic cloud write-back) is now complete** — real cloud writes are live for signed-in ordinary edits, durably tracked, account-bound, and generation-guarded. 5B3C (interactive linking UI, signed-in Import cloud-push) and Phases 6–7 are still just described below. Login gating and startup cloud-hydration changes remain explicitly out of scope through 5B3B — see `BUILD_STATUS.md` → "Phase 5B3B".
+Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for three purposes — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31); Phase 5B2's read-only cloud hydration; and, as of Phase 5B3B, automatic account-bound write-back of ordinary signed-in edits. Phase 5B (two-way synchronization) is staged as 5B1–5B3 under its own approved architecture decisions; 5B1 (internal foundations), 5B2 (signed-in cloud hydration, read-only), 5B3A (account-affinity/provenance/dirty-tracking foundations), and 5B3B (automatic cloud write-back) are all complete. **5B3C (login-first gate, interactive linking UI, returning-device safe refresh, and signed-in Import cloud-push) is now also complete** — see the "Phase 5B3C" section below and `BUILD_STATUS.md` → "Phase 5B3C" for full detail. This also lands the login-gating and startup cloud-hydration behavior that was explicitly deferred through 5B3B. Phases 6–7 are still just described below; Phase 6's cross-device propagation and offline/conflict behavior are now exercisable for the first time, since 5B3C is the point real writes, conflicts, and linking are all present together.
 
 ## Guiding constraints (apply to every phase)
 
@@ -397,20 +397,27 @@ two deliberate scope decisions made explicit by the session that built it — se
   bucket) — matching this section's original testing intent, implemented against the real
   `drainDirtyWork`/`SyncEngineContext` rather than a lower-level session-swap simulation.
 
-#### Phase 5B3C — Interactive linking UI and signed-in Import cloud-push (not started)
+#### Phase 5B3C — Login-first gate, interactive linking UI, safe refresh, and signed-in Import cloud-push (complete)
 
-Builds the three-choice UI for 5B2's `require-explicit-choice` state per decision 15 and points
+→ `BUILD_STATUS.md` → "Phase 5B3C" for full file-by-file detail.
+
+Built the three-choice UI for 5B2's `require-explicit-choice` state per decision 15 and points
 11–14 of the architecture review: an equivalence check (same id sets, identical values) gates
 whether "They match — link this device" is offered. "Keep this device's data" performs a guarded,
 confirmed overwrite per differing id (never a plain `upsertX`), pulls down cloud-only ids without
-deleting anything, and inserts local-only ids. "Use my account's data" requires an explicit
-confirmation naming what will be discarded and a *freshly re-read* cloud state at confirm time
-(not the counts shown when the choice screen first rendered) before applying. "They match" writes
-nothing and only marks the device established. Also adds the signed-in Import cloud-push option
-(decision 10, add/update only, still never delete, per decision 8's "no per-record deletion" and
-decision 11's separate-controls requirement). This is also the point at which Phase 6 below
-becomes fully exercisable, since it needs real writes, conflicts, and offline behavior all present
-to test meaningfully.
+deleting anything, and inserts local-only ids; a per-record write failure is left dirty for the
+existing drain engine rather than a second conflict-resolution implementation. "Use my account's
+data" requires an explicit confirmation naming what will be discarded, offers an export-first
+backup, and re-reads the cloud at confirm time (not the snapshot the choice screen first rendered
+with) before applying. "They match" writes nothing and only marks the device established. Also
+added the signed-in Import cloud-push option (decision 10, add/update only, still never delete, per
+decision 8's "no per-record deletion" and decision 11's separate-controls requirement), the
+login-first gate itself (`src/App.tsx`'s `AuthGate`, active only when Supabase is configured — see
+the AGENTS.md pivot note dated 2026-09-01), and the returning-device "safe refresh" pull path
+(`src/sync/refreshFromCloud.ts`) that makes another device's already-synced edits show up on login,
+app open, or an explicit "Refresh from cloud". Realtime is still explicitly out of scope. This is
+also the point at which Phase 6 below becomes fully exercisable, since it needs real writes,
+conflicts, linking, and offline behavior all present to test meaningfully.
 
 ## Phase 6 — Cross-device, security, offline, and conflict testing
 
@@ -440,6 +447,6 @@ to test meaningfully.
 | 5B2. Signed-in cloud hydration | Complete — read-only; no cloud write activated. First activation of `src/sync/` in the shipped app. Manual verification against the production project still outstanding — see `BUILD_STATUS.md`. A follow-up fix (commit `bf7d967`) closed a related gap at the reducer level — see `BUILD_STATUS.md` → "Phase 5B2 correction" |
 | 5B3A. Account-affinity + mutation-provenance foundations | **Complete** (all three tasks) — `getAuthenticatedSessionFor` account-affinity primitive; `expectedAccountId` required on every mutating repository function including `upsert*`; `ACTION_PROVENANCE` classification and the generation/cancellation scaffold wired into `AppContext.tsx`'s dispatch (dirty-marking made durable in 5B3B). Bundle: 510.13 kB → 510.78 kB (task 2) → 514.42 kB (task 3) — see `BUILD_STATUS.md` |
 | 5B3B. Account-bound cloud write-back | **Complete** — durable, account-bound dirty tracking; single-flight, generation-guarded drain loop with bounded backoff; automatic sync after signed-in edits and on session-available, plus manual "Sync now"; minimal status UI in Settings, including an `'unlinked'` state. Gated on this device being linked to the account (reused `established` flag) — added along with a typed, content-verified duplicate-create resolution after a pre-acceptance review found both were needed. Bundle: 514.42 kB → 524.07 kB. Login gating, startup hydration changes, and Realtime explicitly out of scope — see `BUILD_STATUS.md` → "Phase 5B3B" |
-| 5B3C. Interactive linking UI + signed-in Import cloud-push | Not started |
+| 5B3C. Login-first gate + interactive linking UI + safe refresh + signed-in Import cloud-push | **Complete** — see `BUILD_STATUS.md` → "Phase 5B3C". Realtime remains explicitly out of scope |
 | 6. Cross-device, security, offline, and conflict testing | Not started |
 | 7. Vercel environment configuration and deployment verification | Env vars added and production rebuilt, redirect behavior confirmed working (done as part of Phase 3's manual verification). Confirming ordinary redeployments don't affect existing data still outstanding |

@@ -56,5 +56,18 @@ export function CloudSyncBanner() {
     );
   }
 
+  if (sync.status === 'up-to-date' && sync.message) {
+    // A refresh failure (see refreshFromCloud) — not fatal, this device
+    // keeps whatever it last synced, but the user should be able to retry.
+    return (
+      <p className="message error cloud-sync-banner" role="alert">
+        {sync.message}{' '}
+        <button type="button" className="secondary cloud-sync-retry" onClick={sync.retry}>
+          Refresh from cloud
+        </button>
+      </p>
+    );
+  }
+
   return null;
 }

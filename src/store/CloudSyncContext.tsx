@@ -1,6 +1,7 @@
 import { createContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { hydrateFromCloud, type HydratedCloudData } from '../sync/hydrateFromCloud';
 import type { EntityCounts } from '../sync/hydration';
+import { refreshFromCloud } from '../sync/refreshFromCloud';
 import {
   getAccountMetadata,
   markEstablished,
@@ -137,10 +138,32 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        case 'sync-established':
+        case 'sync-established': {
+          // Requirement 3 (returning device): refresh only ever pulls
+          // records this device has no unsynced edits for — see
+          // refreshFromCloud's doc comment for why that alone is sufficient
+          // to satisfy "never lose unsynced local work" without this
+          // module needing its own drain-first sequencing or conflict
+          // detection.
+          const refreshed = await refreshFromCloud(stateRef.current, accountMetadata);
+          if (!active) return;
+          if (refreshed.ok === false) {
+            // A refresh failure is not fatal — this device is already
+            // linked and has whatever it last synced. Report it but do not
+            // block or clear existing data.
+            setStatus('up-to-date');
+            setMessage(`Could not refresh from your account just now: ${refreshed.message}`);
+            return;
+          }
+          if (refreshed.changed) {
+            dispatch({ type: 'APPLY_REMOTE_UPDATE', data: refreshed.appData });
+          }
+          const nextMetadata = setLastSyncedAt(refreshed.metadata, new Date().toISOString());
+          saveSyncMetadataStore(upsertAccountMetadata(metadataStore, nextMetadata));
           setStatus('up-to-date');
           setMessage(null);
           return;
+        }
 
         case 'require-explicit-choice':
           setStatus('needs-choice');

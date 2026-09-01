@@ -1,4 +1,5 @@
 import { useAuth } from '../store/useAuth';
+import { useCloudSync } from '../store/useCloudSync';
 import { useSyncEngine } from '../store/useSyncEngine';
 import type { SyncStatus } from '../store/SyncEngineContext';
 
@@ -14,6 +15,7 @@ import type { SyncStatus } from '../store/SyncEngineContext';
 export function SyncStatusPanel() {
   const auth = useAuth();
   const sync = useSyncEngine();
+  const cloudSync = useCloudSync();
 
   if (!auth.isSupabaseConfigured || !auth.user) return null;
 
@@ -43,14 +45,24 @@ export function SyncStatusPanel() {
           {sync.pendingCount} {sync.pendingCount === 1 ? 'change' : 'changes'} not yet confirmed in your account.
         </p>
       )}
-      <button
-        type="button"
-        className="secondary"
-        onClick={sync.syncNow}
-        disabled={sync.status === 'syncing' || sync.status === 'unlinked'}
-      >
-        Sync now
-      </button>
+      <div className="settings-actions">
+        <button
+          type="button"
+          className="secondary"
+          onClick={sync.syncNow}
+          disabled={sync.status === 'syncing' || sync.status === 'unlinked'}
+        >
+          Sync now
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={cloudSync.retry}
+          disabled={sync.status === 'unlinked' || cloudSync.status === 'loading'}
+        >
+          Refresh from cloud
+        </button>
+      </div>
     </section>
   );
 }

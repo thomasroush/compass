@@ -96,8 +96,7 @@ export function AccountPanel() {
     <section className="section settings-section">
       <h2>{MODE_COPY[mode].heading}</h2>
       <p className="section-help">
-        Signing in is optional. Daily Compass works fully offline in this browser without an
-        account.
+        Sign in to sync your tasks, projects, and daily notes across devices.
       </p>
 
       {success && (

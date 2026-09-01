@@ -767,7 +767,74 @@ conflict, or a version conflict, gets a real resolution path instead of staying 
 — or, per this session's stated broader goal, the login-gating and startup-hydration work
 explicitly out of scope for 5B3B.
 
-### Phases 5B3C, 6, 7 — not started
+### Phase 5B3C — Login-first gate + cross-device cloud sync (complete)
+
+Built directly on 5B3B's write engine and 5B2's hydration/decision table, with no parallel systems:
+the account-linking gate (`AccountSyncMetadata.established`), `decideHydration`'s decision table, and
+`drainDirtyWork`'s conflict/duplicate resolution are all reused unchanged.
+
+- **Login-first gate.** `src/App.tsx`'s new `AuthGate` wraps the existing route tree: while Supabase
+  is configured, `auth.status === 'loading'` renders `LoadingScreen`, a signed-out user renders
+  `LoginScreen` (the existing `AccountPanel` sign-in/up/reset form, unchanged), and only a signed-in
+  user with no pending linking choice reaches the app shell/routes. `cloudSync.status ===
+  'needs-choice'` renders `LinkingChoice` instead, blocking the app the same way. When Supabase is
+  *not* configured, the gate is skipped entirely — this is the deliberate AGENTS.md pivot documented
+  there under "Cloud Sync (Supabase)": the "never require Supabase while signed out" rule now applies
+  only to the unconfigured case, since a configured deployment has a real account's private data to
+  protect. Providers (`AuthProvider`/`AppProvider`/`CloudSyncProvider`/`SyncEngineProvider`) still wrap
+  everything unconditionally — only the route tree itself is gated.
+- **`require-explicit-choice` resolution (decision 15).** `src/sync/linkingChoice.ts` (pure comparison
+  + guarded-write orchestration, no component-level Supabase calls per AGENTS.md) and
+  `src/components/LinkingChoice.tsx` (the blocking dialog) implement exactly the plan's three named
+  outcomes: "They match" (offered only when `compareForLinking` finds zero local-only/cloud-only/
+  differing ids — a no-op link), "Use my account's data" (cloud loaded wholesale via the existing
+  `APPLY_REMOTE_UPDATE` sync-boundary action, never dirty; offers an export-first backup via the
+  existing `exportJsonBackup` before the irreversible replace), and "Keep this device's data" (every
+  differing id pushed through the *existing* `updateXGuarded`/`createX` repository functions — never a
+  plain unconditional upsert — with a write failure marked dirty and left for `drainDirtyWork` to
+  resolve on its next natural run, rather than re-implementing conflict/duplicate handling a second
+  time here; cloud-only records are pulled down, nothing is ever deleted). All three mark
+  `established` afterward and call the existing `cloudSync.retry()` to force `decideHydration` to
+  re-evaluate now that this device is linked — no new context API surface was added for this.
+- **Returning-device safe refresh (`sync-established`).** `src/sync/refreshFromCloud.ts` is the pull
+  counterpart to `drainSync.ts`: for an already-linked device, it re-reads all three entity lists and
+  applies only the records whose cloud `updated_at` differs from what this device last saw —
+  *skipping every id in `AccountSyncMetadata.dirty`* unconditionally. That one skip is the entire
+  safety mechanism for "pending changes exist -> drain first, before accepting cloud replacement": a
+  dirty record is never touched by refresh, so there is no silent-overwrite scenario to detect in the
+  first place; if the cloud version of a dirty record *also* changed, the drain loop's own guarded
+  update surfaces that as a typed `'conflict'` when it eventually runs, with zero new conflict-
+  detection code needed here. Wired into `CloudSyncContext.tsx`'s `'sync-established'` branch,
+  dispatching the existing `APPLY_REMOTE_UPDATE` only when something actually changed. This is also
+  the Device-A-writes/Device-B-loads-on-startup path: a plain returning-device app open/refresh (no
+  explicit action) now pulls in another device's already-synced changes.
+- **Manual pull control.** `SyncStatusPanel` gained a "Refresh from cloud" button beside the existing
+  "Sync now", both reusing existing actions (`cloudSync.retry()` / `sync.syncNow()` respectively) —
+  no new engine code. `CloudSyncBanner` shows a non-fatal, retryable notice when a `sync-established`
+  refresh attempt itself fails (this device keeps whatever it last synced; nothing is blocked).
+- **Signed-in Import (decision 10).** `IMPORT` remains a sync-boundary action (never dirty, never
+  auto-pushed) exactly as before — `SettingsView.tsx` now additionally asks a signed-in user to choose
+  "This device only" (unchanged behavior) or "This device and my account" (applies `IMPORT` locally,
+  then reuses `runMigration` — the same verified upload path `MigrationPanel` already uses — and marks
+  `established` on success). A signed-out or unconfigured user still gets the single original
+  confirmation, with no choice to make.
+- **Reset.** Unchanged behavior (still local-only, decision 8 — no cloud deletion path exists to call);
+  the confirmation copy now explicitly says a signed-in user's cloud data is not touched, so "Reset"
+  can't be misread as a cloud wipe.
+- **Sign-out / account-switch isolation.** No new code was needed: `AppContext.tsx`'s per-account
+  dirty-set and generation invalidation, `SyncEngineContext.tsx`'s accountId-scoped effects, and
+  `CloudSyncContext.tsx`'s accountId-keyed hydration effect (all Phase 5B3A/5B3B) already stop stale
+  work and re-evaluate cleanly on sign-out or a different account signing in — verified with a
+  dedicated account-isolation test rather than re-implemented.
+- **`MigrationPanel` retained**, unchanged: it still serves `await-explicit-migration` (local-only +
+  empty cloud) and is now also the upload path signed-in Import's cloud-push choice reuses — not
+  retired, and no interface change was needed.
+
+**Not done in 5B3C, by design/instruction:** no Supabase Realtime (per this session's explicit
+exclusion — cross-device sync is login/startup/manual-refresh only, not live push), no AI features, no
+per-record deletion or tombstone sync (decision 8, unchanged), no unrelated refactors.
+
+### Phase 6, 7 — not started
 
 See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
 
@@ -775,8 +842,8 @@ See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var 
 
 ```
 npm run test
-Test Files  29 passed (29)
-Tests       325 passed (325)
+Test Files  34 passed (34)
+Tests       368 passed (368)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
@@ -784,27 +851,34 @@ Tests       325 passed (325)
 extended; 251 once Phase 5B3A task 3's provenance/dirty-marking/generation scaffold and its tests
 first landed; 261 once the REORDER_TASK/enforcePrimaryCap cascading-mutation correction landed,
 before task 3 was ever committed; 295 once Phase 5B3B's drain loop, sync engine, and durable dirty
-tracking first landed; 325 now that the Risk 1 (duplicate-create) and Risk 2 (account-linking gate)
-correction above has landed with its own tests, before 5B3B was ever committed.)
+tracking first landed; 325 once the Risk 1 (duplicate-create) and Risk 2 (account-linking gate)
+correction landed with its own tests, before 5B3B was committed (commit `3d2086b`); 368 now that
+Phase 5B3C's login gate, `LinkingChoice`/`linkingChoice.ts`, `refreshFromCloud.ts`, the signed-in
+Import choice, and every test file touched by them (`App.test.tsx` new; `CloudSyncContext.test.tsx`,
+`SyncStatusPanel.test.tsx`, `CloudSyncBanner.test.tsx`, `SettingsView.test.tsx` extended) has
+landed.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-DijsOgEZ.js   524.07 kB
+dist/assets/index-BFqOAtxU.js   535.11 kB
 ```
 
 (Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
 `src/sync/drainSync.ts`, `src/store/SyncEngineContext.tsx`, and `src/components/SyncStatusPanel.tsx`
 are genuinely imported by the shipped app for the first time, and Phase 5B3A's previously-dead
-`createX`/`updateXGuarded` functions become reachable for the first time too. Grew again to 524.07
-kB with the Risk 1/Risk 2 correction above — the new duplicate-resolution and account-linking-gate
-logic. Cloud writes are now live for signed-in, *linked* ordinary edits — the first phase where
-that is true.)
+`createX`/`updateXGuarded` functions become reachable for the first time too. Grew to 524.07 kB with
+the Risk 1/Risk 2 correction — the new duplicate-resolution and account-linking-gate logic. Grew
+again to 534.96 kB with Phase 5B3C — `LinkingChoice.tsx`/`linkingChoice.ts`, `refreshFromCloud.ts`,
+`LoginScreen.tsx`/`LoadingScreen.tsx`, and `App.tsx`'s gate are all genuinely reachable from the
+shipped entry point for the first time. Cloud writes are live for signed-in, *linked* ordinary
+edits, and the app itself is now gated behind sign-in whenever Supabase is configured — the first
+phase where both are true.)
 
 ## Lint
 
 ```
-npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design)
+npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by Phase 5B3C)
 ```

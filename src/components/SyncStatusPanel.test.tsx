@@ -14,9 +14,14 @@ const syncState = vi.hoisted(() => ({
   message: null as string | null,
   syncNow: vi.fn(),
 }));
+const cloudSyncState = vi.hoisted(() => ({
+  status: 'idle',
+  retry: vi.fn(),
+}));
 
 vi.mock('../store/useAuth', () => ({ useAuth: () => authState }));
 vi.mock('../store/useSyncEngine', () => ({ useSyncEngine: () => syncState }));
+vi.mock('../store/useCloudSync', () => ({ useCloudSync: () => cloudSyncState }));
 
 function setSync(overrides: Partial<typeof syncState>) {
   Object.assign(syncState, { status: 'idle', pendingCount: 0, message: null, ...overrides });
@@ -25,6 +30,7 @@ function setSync(overrides: Partial<typeof syncState>) {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  cloudSyncState.status = 'idle';
 });
 
 describe('SyncStatusPanel — visibility', () => {
@@ -141,5 +147,26 @@ describe('SyncStatusPanel — "Sync now" cannot bypass the linking gate', () => 
 
     fireEvent.click(screen.getByRole('button', { name: /Sync now/i }));
     expect(syncState.syncNow).not.toHaveBeenCalled();
+  });
+});
+
+describe('SyncStatusPanel — "Refresh from cloud" (the pull-side counterpart to "Sync now")', () => {
+  beforeEach(() => {
+    authState.isSupabaseConfigured = true;
+    authState.user = { id: 'user-1', email: 'person@example.com' };
+  });
+
+  it('clicking it calls the cloud-sync retry action', () => {
+    setSync({ status: 'synced' });
+    render(<SyncStatusPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh from cloud' }));
+    expect(cloudSyncState.retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled while this device is unlinked', () => {
+    setSync({ status: 'unlinked' });
+    render(<SyncStatusPanel />);
+    expect(screen.getByRole('button', { name: 'Refresh from cloud' })).toHaveProperty('disabled', true);
   });
 });

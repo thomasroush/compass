@@ -62,8 +62,21 @@ describe('CloudSyncBanner', () => {
     expect(notice.textContent).not.toMatch(/cloud sync writes are not active yet/);
   });
 
-  it('renders nothing while up to date (write-sync status is shown separately, in Settings)', () => {
+  it('renders nothing while up to date with no message (write-sync status is shown separately, in Settings)', () => {
     const { container } = renderWithSync(state({ status: 'up-to-date' }));
     expect(container.textContent).toBe('');
+  });
+
+  it('shows a non-fatal refresh-failure notice, with a working retry, when up-to-date carries a message', () => {
+    const retry = vi.fn();
+    renderWithSync(
+      state({ status: 'up-to-date', message: 'Could not refresh from your account just now: offline.', retry }),
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toMatch(/Could not refresh from your account just now/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh from cloud' }));
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });

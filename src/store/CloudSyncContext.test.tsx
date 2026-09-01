@@ -6,8 +6,8 @@ import { AuthProvider } from './AuthContext';
 import { CloudSyncProvider } from './CloudSyncContext';
 import { useApp } from './useApp';
 import { useCloudSync } from './useCloudSync';
-import { loadSyncMetadataStore } from '../sync/metadataStorage';
-import { getAccountMetadata } from '../sync/metadata';
+import { loadSyncMetadataStore, saveSyncMetadataStore } from '../sync/metadataStorage';
+import { countDirty, getAccountMetadata, markEstablished, setRecordUpdatedAt, upsertAccountMetadata } from '../sync/metadata';
 import type { AppData, DailyNote, Project, Task } from '../types';
 import { createEmptyAppData } from '../types';
 import type { CloudDailyNote, CloudProject, CloudTask, RepositoryResult } from '../repository/types';
@@ -86,6 +86,7 @@ function TestConsumer() {
       <div data-testid="message">{sync.message ?? ''}</div>
       <div data-testid="project-count">{state.projects.length}</div>
       <div data-testid="project-ids">{state.projects.map((p) => p.id).join(',')}</div>
+      <div data-testid="project-names">{state.projects.map((p) => p.name).join(',')}</div>
       <div data-testid="task-count">{state.tasks.length}</div>
       <div data-testid="note-count">{state.dailyNotes.length}</div>
       <button type="button" onClick={sync.retry}>
@@ -296,5 +297,65 @@ describe('CloudSyncProvider', () => {
     expect(screen.getByTestId('status').textContent).toBe('hydrated');
     expect(screen.getByTestId('project-ids').textContent).toBe('fresh-proj');
     expect(screen.getByTestId('project-count').textContent).toBe('1');
+  });
+});
+
+describe('CloudSyncProvider — returning device (already established)', () => {
+  function seedEstablished(local: AppData, seenUpdatedAt: string) {
+    localStorage.setItem('daily-compass-v1', JSON.stringify(local));
+    let metadata = markEstablished(getAccountMetadata(loadSyncMetadataStore(), 'user-1'));
+    metadata = setRecordUpdatedAt(metadata, 'project', 'proj-1', seenUpdatedAt);
+    saveSyncMetadataStore(upsertAccountMetadata(loadSyncMetadataStore(), metadata));
+  }
+
+  it('safely refreshes when the cloud is newer (Device A write reaches Device B on startup)', async () => {
+    seedEstablished(populatedLocal(), '2026-08-29T00:00:00.000Z');
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Renamed on Device A' })]));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
+    signIn('user-1');
+
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('up-to-date'));
+    expect(screen.getByTestId('project-count').textContent).toBe('1');
+
+    // Applied via APPLY_REMOTE_UPDATE — never marked dirty, so this device
+    // does not mistake a remote-applied change for a local edit that itself
+    // needs to be pushed back.
+    const metadata = getAccountMetadata(loadSyncMetadataStore(), 'user-1');
+    expect(countDirty(metadata)).toBe(0);
+    expect(metadata.records.project['proj-1']?.lastKnownUpdatedAt).toBe('2026-08-30T01:00:00.000Z');
+  });
+
+  it('reports up-to-date with nothing changed when the cloud matches what this device already has', async () => {
+    seedEstablished(populatedLocal(), '2026-08-30T01:00:00.000Z');
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
+    signIn('user-1');
+
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('up-to-date'));
+    expect(screen.getByTestId('project-count').textContent).toBe('1');
+    expect(screen.getByTestId('project-ids').textContent).toBe('proj-1');
+  });
+
+  it('protects unsynced local work: a dirty record is never overwritten by an established-device refresh', async () => {
+    const local = populatedLocal();
+    localStorage.setItem('daily-compass-v1', JSON.stringify(local));
+    let metadata = markEstablished(getAccountMetadata(loadSyncMetadataStore(), 'user-1'));
+    metadata = setRecordUpdatedAt(metadata, 'project', 'proj-1', '2026-08-29T00:00:00.000Z');
+    metadata = { ...metadata, dirty: { ...metadata.dirty, project: ['proj-1'] } };
+    saveSyncMetadataStore(upsertAccountMetadata(loadSyncMetadataStore(), metadata));
+
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Cloud disagrees' })]));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
+    signIn('user-1');
+
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('up-to-date'));
+    // This device's own (unsynced) name survives — the refresh skipped the dirty record.
+    expect(screen.getByTestId('project-names').textContent).toBe('Home');
   });
 });
