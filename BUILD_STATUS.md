@@ -207,27 +207,128 @@ banner shows the `'needs-choice'` message rather than silently reloading anythin
 creating a fresh test account with cloud data and an empty local browser profile to confirm the
 `'hydrated'` path actually loads real data end-to-end against the production Supabase project.
 
-### Phases 5B3–7 — not started (authenticated cloud writes, deletion/conflict/offline handling, cross-device/security/offline/conflict testing, remaining deployment verification)
+### Phase 5B2 correction (2026-08-31, commit `bf7d967`) — previously undocumented
+
+`DailyNotesView`'s autosave effect fires on mount regardless of whether the user has typed
+anything, and `UPSERT_DAILY_NOTE` used to create a new record even when both fields were blank.
+5B2's `hydrateFromCloud.ts` already worked around the *symptom* (a `meaningfulLocalCounts` filter
+excluding blank notes from the hydration decision, so a residual blank note wouldn't wrongly make
+a device look "populated" and block a safe cloud pull) — see the description under Phase 5B2 above.
+This follow-up commit fixes the *cause* instead: `appReducer`'s `UPSERT_DAILY_NOTE` case now
+returns `state` unchanged (no record created) when there is no existing note for that date and
+both `morning`/`evening` are blank or whitespace-only. Clearing an *existing* note back to blank
+remains a legitimate edit and is unaffected — only creating a new, still-blank record is refused.
+
+- [x] `src/store/reducer.ts` — the no-op-on-blank-create guard described above.
+- [x] Tests: `src/storage/storage.test.ts` gained 4 cases (blank upsert creates nothing;
+  whitespace-only upsert creates nothing; a real-content upsert still creates normally; clearing an
+  existing note back to blank still works and doesn't delete or restore it).
+  `src/sync/hydrateFromCloud.test.ts` gained a regression test reproducing the reported scenario
+  directly (a device whose only local data is a residual blank daily note still hydrates from a
+  populated cloud account, rather than being treated as "both populated, needs a choice").
+- [x] No change to `hydrateFromCloud.ts`'s own counting logic, `AppContext`, storage schema/version,
+  or any other reducer action.
+
+### Phase 5B3 — architecture revised; first sub-phase in progress
+
+The single undifferentiated Phase 5B3 originally sketched below was superseded before any of it
+was built: an architecture review identified that resolving the acting account from the live
+Supabase session at call time (`getAuthenticatedSession()`, unchanged from Phase 4) leaves a real
+window in which a queued write could be attributed to whichever account is live when it finally
+runs, not the account whose edit it actually was. The approved revision splits 5B3 into three
+sub-phases — 5B3A (account-affinity + provenance foundations, inert), 5B3B (manual "Sync now"
+write-back, activated), 5B3C (interactive linking UI + signed-in Import cloud-push) — full
+rationale in `SUPABASE_IMPLEMENTATION_PLAN.md` → "Phase 5B3". This section tracks 5B3A's progress;
+5B3B and 5B3C are not started.
+
+#### Phase 5B3A, task 1 of 3 — `getAuthenticatedSessionFor` account-affinity primitive (complete; inert)
+
+The smallest independently-testable slice of 5B3A: the account-scoped session primitive itself,
+added and tested in isolation, with **zero callers anywhere in the active application** — no
+repository CRUD function was changed or rewired, no dirty tracking, provenance table, drain loop,
+or UI was added. This mirrors 5B1's own pattern of landing a guarded primitive inert before any
+later phase wires it in.
+
+- [x] `src/repository/types.ts` — added `'account-mismatch'` to `RepositoryErrorType` (alongside
+  the existing `'unconfigured' | 'unauthenticated' | 'database' | 'conflict'`). Confirmed (by
+  search) that no code anywhere exhaustively switches on `RepositoryErrorType` — only `if
+  (result.error.type === 'unauthenticated' || ... === 'unconfigured')`-style checks in
+  `migration.ts` and `hydration.ts`'s `errorType` pass-through — so this is a non-breaking,
+  additive change requiring no other update for type-safety.
+- [x] `src/repository/session.ts` — added `getAuthenticatedSessionFor(expectedAccountId)` alongside
+  (not replacing) the existing `getAuthenticatedSession()`. It reads the session exactly once via
+  one `supabase.auth.getSession()` call, preserves the existing `unconfigured`/`database`/
+  `unauthenticated` handling unchanged, and additionally compares the live session's `user.id`
+  against `expectedAccountId` — a mismatch returns the new `'account-mismatch'` error before any
+  table access is attempted. `expectedAccountId` is used for exactly one thing, that equality
+  comparison; it is never sent to Supabase and never used to select or authorize an account —
+  fail-closed, not fail-open.
+  - **Why this closes the real gap, not just the obvious one:** a caller that checks "is the
+    active account still A?" in React and then separately calls a repository function has a
+    window between those two steps for a sign-out/different sign-in to land in — the repository
+    function's own, later, independent session lookup would then resolve to the new account. The
+    same gap exists one level deeper inside `supabase-js` itself: `auth.getSession()` and the
+    token `postgrest-js` actually attaches to an outgoing request are two separate internal reads,
+    moments apart. Comparing `expectedAccountId` against a session read is therefore not
+    sufficient on its own — what closes the gap is that `getAuthenticatedSessionFor` returns an
+    `AccountScopedSession.client`, a freshly constructed Supabase client (`createClient` with
+    `global.headers.Authorization` pinned to the exact `access_token` from the one `getSession()`
+    call just verified, and `auth: { persistSession: false, autoRefreshToken: false }` so it never
+    persists to or reads from `localStorage` and never becomes a second, independently-mutating
+    session). A later account-scoped repository call issued through that client cannot be
+    re-pointed at a different account no matter what happens to the ambient `supabase` singleton's
+    session afterward, because it never asks the ambient client for a token in the first place.
+- [x] Tests: `src/repository/session.accountScoped.test.ts` (4 tests, `../lib/supabaseClient` and
+  `@supabase/supabase-js`'s `createClient` both mocked, no live network calls) — matching account
+  succeeds and returns a client that is a distinct object from the ambient mocked client, pinned
+  to the verified `access_token` with `persistSession`/`autoRefreshToken` both `false`; a mismatched
+  account returns `'account-mismatch'` and asserts neither `createClient` nor the ambient client's
+  `from()` was ever called (no table/network access on mismatch); a missing session returns the
+  existing `'unauthenticated'` result unchanged; a `getSession()` failure returns the existing
+  `'database'` result unchanged. `src/repository/session.accountScoped.unconfigured.test.ts` (1
+  test) — unconfigured Supabase returns the existing `'unconfigured'` result without attempting a
+  network call, mirroring `session.unconfigured.test.ts`'s existing pattern.
+- [x] Confirmed no active caller: `getAuthenticatedSessionFor` and `'account-mismatch'` each appear
+  only in `session.ts`/`types.ts` and their own new test files (searched across `src/`) — nothing
+  in `AppContext`, `CloudSyncContext`, any repository CRUD function, or any component references
+  either. Confirmed via `npm run build`: `dist/assets/index-*.js` is **byte-for-byte identical**
+  (same content hash, same 510,131 bytes) between a clean build of `bf7d967` and a clean build with
+  this change applied — Rollup fully tree-shakes the new function, its message string, and its
+  otherwise-unused `createClient`/pinned-client helper since nothing imports them, exactly like
+  Phase 5B1's inert additions.
+- [ ] Not done (by design — deferred to later 5B3A tasks and 5B3B/5B3C, per the approved
+  revision): no repository CRUD function requires `expectedAccountId` yet; no dirty-tracking
+  `markDirty` wiring or `ACTION_PROVENANCE` table; no sync-engine drain loop or generation/
+  cancellation scaffold; no linking UI; no cloud write of any kind beyond what already exists.
+
+### Phases 5B3B/5B3C, 6, 7 — not started
 
 See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
 
-**Next recommended step:** finish Phase 2's manual cross-account verification (still outstanding, independent of this work); manually verify 5B2 above against the production project; then build 5B3 — the interactive resolution for `require-explicit-choice`, a manual "Sync now" action, and wiring `updateProjectGuarded`/`updateTaskGuarded`/`updateDailyNoteGuarded` into a real write path — before Phase 6's cross-device/security/offline/conflict testing.
+**Next recommended step (subject to review of this slice):** finish Phase 2's manual cross-account verification (still outstanding, independent of this work); manually verify 5B2 above against the production project; then continue 5B3A — requiring `expectedAccountId` on the mutating repository functions and adding the `ACTION_PROVENANCE`-driven dirty-marking, still inert — before 5B3B activates any write.
 
 ## Latest test results
 
 ```
 npm run test
-Test Files  21 passed (21)
-Tests       171 passed (171)
+Test Files  23 passed (23)
+Tests       185 passed (185)
 ```
+
+(180 passed as of `bf7d967`, before this task's 5 new tests. The doc's previous "171 passed"
+figure predated the `bf7d967` blank-note-fix commit's own 9 additional tests and was stale
+independent of this task.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-CtXup8xf.js   509.90 kB
+dist/assets/index-Caou51tN.js   510.13 kB
 ```
+
+(Confirmed byte-for-byte identical — same file hash, same 510,131 bytes — to a clean build of
+`bf7d967` without this task's changes; see the 5B3A section above.)
 
 ## Lint
 

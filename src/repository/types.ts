@@ -14,8 +14,21 @@ export type CloudDailyNote = DailyNote & { updatedAt: string };
  * expected `updated_at` no longer matches the server row — i.e. someone else
  * (another device) wrote to it first. It is distinct from 'database', which
  * means the query itself failed.
+ *
+ * 'account-mismatch' is returned only by `getAuthenticatedSessionFor` (see
+ * repository/session.ts) when the live Supabase session belongs to a
+ * different account than the one a caller expected — e.g. a queued write
+ * whose owning account signed out and a different account signed in before
+ * the write ran. It is distinct from 'unauthenticated' (nobody signed in at
+ * all) and is fail-closed: it is never used to select or authorize an
+ * account, only to refuse acting on behalf of the wrong one.
  */
-export type RepositoryErrorType = 'unconfigured' | 'unauthenticated' | 'database' | 'conflict';
+export type RepositoryErrorType =
+  | 'unconfigured'
+  | 'unauthenticated'
+  | 'database'
+  | 'conflict'
+  | 'account-mismatch';
 
 export interface RepositoryError {
   type: RepositoryErrorType;
