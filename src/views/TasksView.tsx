@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../store/useApp';
 import { TaskForm } from '../components/TaskForm';
 import { TaskRow } from '../components/TaskRow';
+import { getVisibleProjects } from '../store/reducer';
 import { PRIORITIES, TASK_STATUSES, type Priority, type TaskStatus } from '../types';
 
 export function TasksView() {
@@ -12,6 +13,8 @@ export function TasksView() {
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [showArchived, setShowArchived] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
+
+  const visibleProjects = getVisibleProjects(state.projects);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -94,7 +97,7 @@ export function TasksView() {
             onChange={(e) => setProjectFilter(e.target.value)}
           >
             <option value="all">All</option>
-            {state.projects.map((p) => (
+            {visibleProjects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
               </option>

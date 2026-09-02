@@ -8,6 +8,7 @@ import { clearAppData, flushSave } from '../storage/storage';
 import { AccountPanel } from '../components/AccountPanel';
 import { MigrationPanel } from '../components/MigrationPanel';
 import { SyncStatusPanel } from '../components/SyncStatusPanel';
+import { ArchivedProjectsPanel } from '../components/ArchivedProjectsPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { runMigration } from '../repository/migration';
 import { getAccountMetadata, markEstablished, upsertAccountMetadata } from '../sync/metadata';
@@ -115,6 +116,7 @@ export function SettingsView() {
       <AccountPanel />
       <MigrationPanel />
       <SyncStatusPanel />
+      <ArchivedProjectsPanel />
 
       <section className="section settings-section">
         <h2>Data storage</h2>
@@ -129,7 +131,7 @@ export function SettingsView() {
         <h2>Export</h2>
         <div className="settings-actions">
           <button type="button" onClick={() => exportJsonBackup(state)}>
-            Export JSON backup
+            Export Backup
           </button>
           <button type="button" className="secondary" onClick={() => exportMarkdownFile(state)}>
             Export active tasks (Markdown)
@@ -137,7 +139,14 @@ export function SettingsView() {
         </div>
       </section>
 
-      <section className="section settings-section">
+      {/*
+        JSON import is hidden from the UI per request, but the underlying
+        import logic (handleImportFile/confirmImport below, and both dialogs
+        further down) is intentionally kept intact and untouched — the
+        `hidden` attribute removes this section from view, focus order, and
+        the accessibility tree without deleting any of that code.
+      */}
+      <section className="section settings-section" hidden>
         <h2>Import</h2>
         <p>Import a JSON backup. This replaces all current data on this device after confirmation.</p>
         <input

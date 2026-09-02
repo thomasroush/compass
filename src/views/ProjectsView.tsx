@@ -1,7 +1,8 @@
 import { FormEvent, useState } from 'react';
 import { useApp } from '../store/useApp';
-import { getProjectTasks } from '../store/reducer';
+import { getProjectTasks, getVisibleProjects } from '../store/reducer';
 import { TaskRow } from '../components/TaskRow';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { Project, ProjectStatus } from '../types';
 
 export function ProjectsView() {
@@ -12,8 +13,9 @@ export function ProjectsView() {
   const [editing, setEditing] = useState<Project | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [archiving, setArchiving] = useState<Project | null>(null);
 
-  const sorted = [...state.projects].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = getVisibleProjects(state.projects).sort((a, b) => a.name.localeCompare(b.name));
 
   function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -43,6 +45,13 @@ export function ProjectsView() {
 
   function setStatus(id: string, status: ProjectStatus) {
     dispatch({ type: 'UPDATE_PROJECT', id, status });
+  }
+
+  function confirmArchive() {
+    if (!archiving) return;
+    setStatus(archiving.id, 'archived');
+    if (expandedId === archiving.id) setExpandedId(null);
+    setArchiving(null);
   }
 
   return (
@@ -107,15 +116,13 @@ export function ProjectsView() {
                         Mark completed
                       </button>
                     )}
-                    {project.status !== 'archived' && (
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => setStatus(project.id, 'archived')}
-                      >
-                        Archive
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setArchiving(project)}
+                    >
+                      Archive
+                    </button>
                     {project.status !== 'active' && (
                       <button
                         type="button"
@@ -195,6 +202,15 @@ export function ProjectsView() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={archiving !== null}
+        title="Archive project"
+        message={`Archive "${archiving?.name}"? It will be hidden from projects and task selection, but its data is kept and it can be restored from Settings.`}
+        confirmLabel="Archive"
+        onConfirm={confirmArchive}
+        onCancel={() => setArchiving(null)}
+      />
     </div>
   );
 }

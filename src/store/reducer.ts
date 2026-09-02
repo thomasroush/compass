@@ -39,6 +39,14 @@ export function getProjectTasks(tasks: Task[], projectId: string): Task[] {
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+export function getVisibleProjects(projects: Project[]): Project[] {
+  return projects.filter((p) => p.status !== 'archived');
+}
+
+export function getArchivedProjects(projects: Project[]): Project[] {
+  return projects.filter((p) => p.status === 'archived');
+}
+
 export function getDailyNoteForDate(notes: DailyNote[], date: string): DailyNote | undefined {
   return notes.find((n) => n.date === date);
 }

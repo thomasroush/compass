@@ -37,6 +37,7 @@ vi.mock('../repository/migration', () => mocks.migration);
 vi.mock('../components/AccountPanel', () => ({ AccountPanel: () => null }));
 vi.mock('../components/MigrationPanel', () => ({ MigrationPanel: () => null }));
 vi.mock('../components/SyncStatusPanel', () => ({ SyncStatusPanel: () => null }));
+vi.mock('../components/ArchivedProjectsPanel', () => ({ ArchivedProjectsPanel: () => null }));
 
 const importedData: AppData = {
   ...createEmptyAppData(),
@@ -65,6 +66,35 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe('SettingsView — Export', () => {
+  it('labels the JSON export button "Export Backup" and calls exportJsonBackup on click', () => {
+    render(<SettingsView />);
+    const button = screen.getByRole('button', { name: 'Export Backup' });
+    fireEvent.click(button);
+    expect(mocks.exportImport.exportJsonBackup).toHaveBeenCalledWith(mocks.appState.current);
+  });
+
+  it('leaves the Markdown export button untouched', () => {
+    render(<SettingsView />);
+    fireEvent.click(screen.getByRole('button', { name: 'Export active tasks (Markdown)' }));
+    expect(mocks.exportImport.exportMarkdownFile).toHaveBeenCalledWith(mocks.appState.current);
+  });
+});
+
+describe('SettingsView — Import is hidden from the UI', () => {
+  it('renders the Import section with the hidden attribute, so it is not visible or reachable', () => {
+    render(<SettingsView />);
+    const importHeading = screen.getByText('Import');
+    const section = importHeading.closest('section');
+    expect(section).not.toBeNull();
+    expect(section).toHaveProperty('hidden', true);
+  });
+});
+
+// The Import section is UI-hidden (see the test above), but its underlying
+// code is deliberately intact per instruction, and `fireEvent` operates on
+// the DOM directly regardless of the `hidden` attribute — so these tests
+// keep exercising that underlying logic as a regression safety net.
 describe('SettingsView — Import (signed out or Supabase not configured)', () => {
   it('replaces local data with a single confirmation, with no cloud-push choice offered', async () => {
     mocks.authState.user = null;
