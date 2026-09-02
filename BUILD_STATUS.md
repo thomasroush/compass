@@ -834,6 +834,24 @@ the account-linking gate (`AccountSyncMetadata.established`), `decideHydration`'
 exclusion — cross-device sync is login/startup/manual-refresh only, not live push), no AI features, no
 per-record deletion or tombstone sync (decision 8, unchanged), no unrelated refactors.
 
+**Real-world cross-device verification (2026-09-02):** a task created on a phone appeared on a
+desktop within seconds, and a task created on the desktop appeared on the phone within seconds,
+confirming the full round trip — signed-in write, `drainDirtyWork` push, and the returning device's
+`refreshFromCloud` pull — against the live production Supabase project on two physically separate
+devices. This closes out the manual cross-device check called for at the end of 5B3B/5B3C.
+
+## Migration status: complete
+
+The Supabase cloud migration (Phases 1 through 5B3C) is done and closed. Authentication, cloud
+persistence, and account-bound cross-device synchronization are all active in the shipped app and
+have been verified in production, including the real-device round trip above. `npm run lint`,
+`npm run test`, and `npm run build` all pass (see **Latest test results**, **Latest build results**,
+and **Lint** below). Phase 2's manual cross-account RLS check remains the one item still worth
+running against the live project before onboarding additional accounts (see the Phase 2 section
+above); it does not block this migration, which was scoped to a single private account across that
+account's own devices. Phase 6/7 polish items below are optional follow-up, not part of this
+migration's scope.
+
 ### Phase 6, 7 — not started
 
 See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
