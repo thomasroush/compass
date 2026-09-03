@@ -331,8 +331,14 @@ a:focus-visible {
 }
 
 .board {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.board-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(5, 1fr);
   gap: 0.75rem;
   align-items: start;
 }
@@ -600,7 +606,7 @@ code {
     background: #eff6ff;
   }
 
-  .board {
+  .board-row {
     grid-template-columns: 1fr;
   }
 
