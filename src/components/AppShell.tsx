@@ -18,7 +18,9 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Main navigation">
-        <div className="brand">Daily Compass</div>
+        <div className="brand">
+          <img src="/compass_logo.jpg" alt="Daily Compass" className="brand-logo" />
+        </div>
         <nav className="sidebar-nav">
           {NAV_ITEMS.map((item) => (
             <Link
@@ -34,7 +36,9 @@ export function AppShell() {
 
       <div className="main-column">
         <header className="top-bar">
-          <div className="brand mobile-brand">Daily Compass</div>
+          <div className="brand mobile-brand">
+            <img src="/compass_logo.jpg" alt="Daily Compass" className="brand-logo" />
+          </div>
           <QuickAddTask />
         </header>
 

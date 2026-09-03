@@ -128,6 +128,13 @@ a:focus-visible {
   margin-bottom: 1.5rem;
 }
 
+.brand-logo {
+  display: block;
+  height: 2rem;
+  width: auto;
+  max-width: 100%;
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -566,6 +573,10 @@ code {
     display: block;
     font-weight: 600;
     white-space: nowrap;
+  }
+
+  .mobile-brand .brand-logo {
+    height: 1.5rem;
   }
 
   .top-bar {
