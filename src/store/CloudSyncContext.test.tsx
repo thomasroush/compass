@@ -92,6 +92,9 @@ function TestConsumer() {
       <button type="button" onClick={sync.retry}>
         retry
       </button>
+      <button type="button" onClick={sync.refreshAcceptingServer}>
+        refresh accepting server
+      </button>
     </div>
   );
 }
@@ -357,5 +360,34 @@ describe('CloudSyncProvider — returning device (already established)', () => {
     await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('up-to-date'));
     // This device's own (unsynced) name survives — the refresh skipped the dirty record.
     expect(screen.getByTestId('project-names').textContent).toBe('Home');
+  });
+
+  it('"Refresh from cloud" (refreshAcceptingServer) resolves a record stuck in conflict: accepts the server version, updates local, and clears the stuck dirty/pending entry', async () => {
+    const local = populatedLocal();
+    localStorage.setItem('daily-compass-v1', JSON.stringify(local));
+    let metadata = markEstablished(getAccountMetadata(loadSyncMetadataStore(), 'user-1'));
+    metadata = setRecordUpdatedAt(metadata, 'project', 'proj-1', '2026-08-29T00:00:00.000Z');
+    metadata = { ...metadata, dirty: { ...metadata.dirty, project: ['proj-1'] } };
+    saveSyncMetadataStore(upsertAccountMetadata(loadSyncMetadataStore(), metadata));
+
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Cloud disagrees' })]));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
+    signIn('user-1');
+
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('up-to-date'));
+    // Plain sign-in refresh still protects it, same as the test above.
+    expect(screen.getByTestId('project-names').textContent).toBe('Home');
+    expect(countDirty(getAccountMetadata(loadSyncMetadataStore(), 'user-1'))).toBe(1);
+
+    act(() => {
+      screen.getByRole('button', { name: 'refresh accepting server' }).click();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('project-names').textContent).toBe('Cloud disagrees'));
+    const finalMetadata = getAccountMetadata(loadSyncMetadataStore(), 'user-1');
+    expect(countDirty(finalMetadata)).toBe(0);
+    expect(finalMetadata.records.project['proj-1']?.lastKnownUpdatedAt).toBe('2026-08-30T01:00:00.000Z');
   });
 });

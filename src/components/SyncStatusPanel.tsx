@@ -57,7 +57,7 @@ export function SyncStatusPanel() {
         <button
           type="button"
           className="secondary"
-          onClick={cloudSync.retry}
+          onClick={cloudSync.refreshAcceptingServer}
           disabled={sync.status === 'unlinked' || cloudSync.status === 'loading'}
         >
           Refresh from cloud

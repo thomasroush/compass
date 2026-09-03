@@ -4,6 +4,7 @@ import { listTasks } from '../repository/tasksRepository';
 import type { RepositoryResult } from '../repository/types';
 import type { AppData, DailyNote, Project, Task } from '../types';
 import {
+  clearDirty,
   getRecordUpdatedAt,
   setRecordUpdatedAt,
   type AccountSyncMetadata,
@@ -16,17 +17,26 @@ import {
  * cloud since this device last saw it — the counterpart to
  * `src/sync/drainSync.ts`, which pushes local changes up.
  *
- * Never touches a record this device has unsynced local edits for (`dirty`)
- * — refreshing a dirty record here would silently discard those edits
- * (exactly what "do not silently replace valid local data" rules out).
- * Skipping it here is deliberate and sufficient: once that record is
- * eventually drained (cleared), a later refresh naturally picks up whatever
- * the cloud holds by then. If the cloud version *also* changed in the
- * meantime, the drain loop's own guarded update will detect that as a typed
- * `'conflict'` when it runs — this module does not need its own conflict
- * detection to satisfy "report a conflict rather than silently picking a
- * side," it simply never creates the silent-overwrite scenario in the first
- * place by leaving dirty records alone.
+ * By default, never touches a record this device has unsynced local edits
+ * for (`dirty`) — refreshing a dirty record here would silently discard
+ * those edits (exactly what "do not silently replace valid local data" rules
+ * out). Skipping it here is deliberate and sufficient for the automatic
+ * (sign-in) refresh: once that record is eventually drained (cleared), a
+ * later refresh naturally picks up whatever the cloud holds by then. If the
+ * cloud version *also* changed in the meantime, the drain loop's own guarded
+ * update will detect that as a typed `'conflict'` when it runs.
+ *
+ * `acceptConflicts` (only ever passed `true` by the user-initiated "Refresh
+ * from cloud" action, never by the automatic sign-in refresh) opts a dirty
+ * record into resolution instead of protection, but only when the cloud's
+ * `updatedAt` no longer matches this device's known baseline for it — i.e.
+ * only a record that is actually stuck in conflict (the drain loop's guarded
+ * update can never succeed against a stale baseline). A dirty record whose
+ * baseline still matches the cloud is merely pending, not conflicted, and is
+ * still left alone for the normal drain loop to push. This is the explicit,
+ * user-requested counterpart to "report a conflict rather than silently
+ * picking a side" — it silently picks the server's side only when the user
+ * asked it to.
  *
  * Never deletes a local record that is missing from the cloud list — this
  * app has no per-record deletion or tombstone concept (decision 8); a
@@ -49,21 +59,28 @@ function refreshEntity<T extends { id: string }, C extends T & { updatedAt: stri
   cloudRecords: C[],
   metadata: AccountSyncMetadata,
   dirtyIds: string[],
+  acceptConflicts: boolean,
 ): { records: T[]; metadata: AccountSyncMetadata; changed: boolean } {
   let changed = false;
   let nextMetadata = metadata;
   const localById = new Map(localRecords.map((r) => [r.id, r]));
 
   for (const cloudRecord of cloudRecords) {
-    if (dirtyIds.includes(cloudRecord.id)) continue; // protect pending local work
-
     const knownUpdatedAt = getRecordUpdatedAt(metadata, entity, cloudRecord.id);
-    if (knownUpdatedAt === cloudRecord.updatedAt) continue; // already current
+    const isDirty = dirtyIds.includes(cloudRecord.id);
+
+    if (isDirty) {
+      if (!acceptConflicts) continue; // protect pending local work
+      if (knownUpdatedAt === cloudRecord.updatedAt) continue; // not actually conflicted — still just pending
+    } else if (knownUpdatedAt === cloudRecord.updatedAt) {
+      continue; // already current
+    }
 
     const { updatedAt, ...content } = cloudRecord;
     void updatedAt;
     localById.set(cloudRecord.id, content as unknown as T);
     nextMetadata = setRecordUpdatedAt(nextMetadata, entity, cloudRecord.id, cloudRecord.updatedAt);
+    if (isDirty) nextMetadata = clearDirty(nextMetadata, entity, cloudRecord.id);
     changed = true;
   }
 
@@ -73,6 +90,7 @@ function refreshEntity<T extends { id: string }, C extends T & { updatedAt: stri
 export async function refreshFromCloud(
   local: AppData,
   metadata: AccountSyncMetadata,
+  acceptConflicts = false,
 ): Promise<RefreshOutcome | RefreshFailure> {
   const [projectsResult, tasksResult, notesResult] = await Promise.all([
     listProjects(),
@@ -97,6 +115,7 @@ export async function refreshFromCloud(
     projectsResult.data,
     metadata,
     metadata.dirty.project,
+    acceptConflicts,
   );
   const tasks = refreshEntity<Task, (typeof tasksResult.data)[number]>(
     'task',
@@ -104,6 +123,7 @@ export async function refreshFromCloud(
     tasksResult.data,
     projects.metadata,
     metadata.dirty.task,
+    acceptConflicts,
   );
   const dailyNotes = refreshEntity<DailyNote, (typeof notesResult.data)[number]>(
     'dailyNote',
@@ -111,6 +131,7 @@ export async function refreshFromCloud(
     notesResult.data,
     tasks.metadata,
     metadata.dirty.dailyNote,
+    acceptConflicts,
   );
 
   return {

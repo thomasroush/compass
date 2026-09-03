@@ -17,6 +17,7 @@ const syncState = vi.hoisted(() => ({
 const cloudSyncState = vi.hoisted(() => ({
   status: 'idle',
   retry: vi.fn(),
+  refreshAcceptingServer: vi.fn(),
 }));
 
 vi.mock('../store/useAuth', () => ({ useAuth: () => authState }));
@@ -156,12 +157,13 @@ describe('SyncStatusPanel — "Refresh from cloud" (the pull-side counterpart to
     authState.user = { id: 'user-1', email: 'person@example.com' };
   });
 
-  it('clicking it calls the cloud-sync retry action', () => {
+  it('clicking it calls the conflict-resolving refresh action, not plain retry', () => {
     setSync({ status: 'synced' });
     render(<SyncStatusPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh from cloud' }));
-    expect(cloudSyncState.retry).toHaveBeenCalledTimes(1);
+    expect(cloudSyncState.refreshAcceptingServer).toHaveBeenCalledTimes(1);
+    expect(cloudSyncState.retry).not.toHaveBeenCalled();
   });
 
   it('is disabled while this device is unlinked', () => {

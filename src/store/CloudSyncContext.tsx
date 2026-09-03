@@ -55,6 +55,16 @@ export interface CloudSyncState {
   cloudCounts: EntityCounts | null;
   /** Re-runs the last hydration attempt. Only meaningful while status is 'error'. */
   retry: () => void;
+  /**
+   * The user-initiated "Refresh from cloud" action. Unlike `retry`, this also
+   * resolves any record that is dirty *and* stuck in conflict (its cloud
+   * `updatedAt` no longer matches this device's known baseline, so the drain
+   * loop's guarded update can never succeed against it): the server's
+   * version is accepted, the local copy is updated, and the record is no
+   * longer left dirty. A dirty record that is merely pending (not yet
+   * conflicted) is still left alone for the normal drain loop.
+   */
+  refreshAcceptingServer: () => void;
 }
 
 export const CloudSyncContext = createContext<CloudSyncState | null>(null);
@@ -85,6 +95,10 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
   const [localCounts, setLocalCounts] = useState<EntityCounts | null>(null);
   const [cloudCounts, setCloudCounts] = useState<EntityCounts | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // Set by `refreshAcceptingServer` just before bumping `attempt`, and
+  // consumed (then reset) the next time the effect below actually runs a
+  // refresh — so an ordinary `retry()` (or a sign-in) never inherits it.
+  const acceptConflictsRef = useRef(false);
 
   // Read inside the effect via a ref so a hydration in flight always applies
   // to the freshest local state without re-triggering the effect on every
@@ -144,8 +158,12 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
           // refreshFromCloud's doc comment for why that alone is sufficient
           // to satisfy "never lose unsynced local work" without this
           // module needing its own drain-first sequencing or conflict
-          // detection.
-          const refreshed = await refreshFromCloud(stateRef.current, accountMetadata);
+          // detection. The one exception is a record dirty *and* stuck in
+          // conflict, which `acceptConflicts` resolves — but only when this
+          // pass was triggered by the explicit "Refresh from cloud" action.
+          const acceptConflicts = acceptConflictsRef.current;
+          acceptConflictsRef.current = false;
+          const refreshed = await refreshFromCloud(stateRef.current, accountMetadata, acceptConflicts);
           if (!active) return;
           if (refreshed.ok === false) {
             // A refresh failure is not fatal — this device is already
@@ -212,6 +230,10 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
     localCounts,
     cloudCounts,
     retry: () => setAttempt((n) => n + 1),
+    refreshAcceptingServer: () => {
+      acceptConflictsRef.current = true;
+      setAttempt((n) => n + 1);
+    },
   };
 
   return <CloudSyncContext.Provider value={value}>{children}</CloudSyncContext.Provider>;

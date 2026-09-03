@@ -86,6 +86,52 @@ describe('refreshFromCloud — returning-device pull', () => {
     expect(result.metadata.records.project['proj-1']?.lastKnownUpdatedAt).toBe('2026-08-29T00:00:00.000Z');
   });
 
+  it('with acceptConflicts, still protects a merely-pending dirty record whose baseline matches the cloud (nothing to resolve)', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+    const local = localWith({ projects: [{ ...project, name: 'My unsaved local edit' }] });
+    let metadata = metadataWith();
+    metadata = setRecordUpdatedAt(metadata, 'project', 'proj-1', '2026-08-30T01:00:00.000Z');
+    metadata = markDirty(metadata, 'project', 'proj-1');
+
+    const result = await refreshFromCloud(local, metadata, true);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changed).toBe(false);
+    expect(result.appData.projects).toEqual([{ id: 'proj-1', name: 'My unsaved local edit', status: 'active' }]);
+  });
+
+  it('with acceptConflicts, resolves a dirty record stuck in conflict by accepting the server version and clearing dirty', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Cloud says something else' })]));
+    const local = localWith({ projects: [{ ...project, name: 'My stuck local edit' }] });
+    let metadata = metadataWith();
+    metadata = setRecordUpdatedAt(metadata, 'project', 'proj-1', '2026-08-29T00:00:00.000Z');
+    metadata = markDirty(metadata, 'project', 'proj-1');
+
+    const result = await refreshFromCloud(local, metadata, true);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changed).toBe(true);
+    expect(result.appData.projects).toEqual([{ id: 'proj-1', name: 'Cloud says something else', status: 'active' }]);
+    expect(result.metadata.records.project['proj-1']?.lastKnownUpdatedAt).toBe('2026-08-30T01:00:00.000Z');
+    expect(result.metadata.dirty.project).toEqual([]);
+  });
+
+  it('with acceptConflicts, resolves a dirty record that was never synced (no baseline) but now also exists in the cloud under the same id', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Created on another device' })]));
+    const local = localWith({ projects: [{ ...project, name: 'Created on this device' }] });
+    const metadata = markDirty(metadataWith(), 'project', 'proj-1');
+
+    const result = await refreshFromCloud(local, metadata, true);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changed).toBe(true);
+    expect(result.appData.projects).toEqual([{ id: 'proj-1', name: 'Created on another device', status: 'active' }]);
+    expect(result.metadata.dirty.project).toEqual([]);
+  });
+
   it('never deletes a local record that is missing from a fresh cloud read (no tombstones)', async () => {
     projectsRepo.listProjects.mockResolvedValue(ok([]));
     const local = localWith({ projects: [project] });
