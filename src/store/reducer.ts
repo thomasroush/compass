@@ -55,6 +55,31 @@ export function countPrimaryTodayTasks(tasks: Task[]): number {
   return getActiveTasks(tasks).filter((t) => t.status === 'Today' && t.isPrimary).length;
 }
 
+export interface DueDateGroup {
+  date: string;
+  tasks: Task[];
+}
+
+/**
+ * Groups active tasks that carry a user-assigned due date by that date,
+ * in chronological order. Undated and archived tasks are excluded.
+ */
+export function getTasksGroupedByDueDate(tasks: Task[]): DueDateGroup[] {
+  const groups = new Map<string, Task[]>();
+  for (const task of getActiveTasks(tasks)) {
+    if (!task.dueDate) continue;
+    const group = groups.get(task.dueDate);
+    if (group) group.push(task);
+    else groups.set(task.dueDate, [task]);
+  }
+  return Array.from(groups.keys())
+    .sort()
+    .map((date) => ({
+      date,
+      tasks: groups.get(date)!.sort((a, b) => a.sortOrder - b.sortOrder),
+    }));
+}
+
 export function nextSortOrder(tasks: Task[], status: TaskStatus): number {
   const inStatus = tasks.filter((t) => t.status === status && !t.archived);
   if (inStatus.length === 0) return 0;

@@ -10,6 +10,7 @@ import { SyncEngineProvider } from './store/SyncEngineContext';
 import { useAuth } from './store/useAuth';
 import { useCloudSync } from './store/useCloudSync';
 import { BoardView } from './views/BoardView';
+import { CalendarView } from './views/CalendarView';
 import { DailyNotesView } from './views/DailyNotesView';
 import { ProjectsView } from './views/ProjectsView';
 import { SettingsView } from './views/SettingsView';
@@ -46,6 +47,7 @@ function AuthGate() {
         <Route path="tasks" element={<TasksView />} />
         <Route path="projects" element={<ProjectsView />} />
         <Route path="notes" element={<DailyNotesView />} />
+        <Route path="calendar" element={<CalendarView />} />
         <Route path="settings" element={<SettingsView />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

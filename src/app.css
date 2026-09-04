@@ -296,6 +296,22 @@ a:focus-visible {
   color: var(--accent);
 }
 
+.calendar-day-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.calendar-day-heading.overdue {
+  color: var(--danger);
+}
+
+.overdue-badge {
+  border-color: var(--danger);
+  background: #fef2f2;
+  color: var(--danger);
+}
+
 .task-actions {
   display: flex;
   flex-wrap: wrap;
