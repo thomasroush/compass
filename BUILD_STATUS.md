@@ -934,12 +934,36 @@ migration's scope or status.
     (+5 — sort order, badge visibility, set/clear via the edit dialog, and pre-fill on open). 424 tests
     passing (up from 400).
 
+- **Tasks tab as a triage inbox (2026-09-07).** `TasksView` no longer shows a general
+  search/filter/browse list of all tasks. It now shows exactly one fixed set: active
+  (non-archived) tasks with no assigned project, still at the default `Normal` priority, and
+  still in `Inbox` status — sorted by `createdAt` descending (newest first). The moment any one
+  of those three conditions changes (a project is assigned, priority is set to `Low`/`High`, or
+  status moves off `Inbox`), the task drops out of this list — it is never deleted or archived,
+  and remains visible in its project, Board, Calendar, and every other existing view.
+  - No schema or migration change: `Task` already carried `projectId`, `priority`, `status`, and
+    `createdAt`; this is a pure read-side filter/sort.
+  - `src/store/reducer.ts` — new selector `getTriageTasks(tasks)` implementing the filter/sort
+    above, following the existing `getActiveTasks`/`getTasksByStatus`-style selector pattern.
+  - `src/views/TasksView.tsx` — rewritten to render `getTriageTasks(state.tasks)` directly. The
+    prior search box and status/priority/project/show-archived filter controls were removed
+    (they allowed filtering back to a view of already-triaged or archived tasks, which conflicts
+    with "disappears once triaged"); the "New task" button and the existing `TaskForm`/`TaskRow`
+    create/edit workflow are unchanged.
+  - Tests: `src/store/reducer.triage.test.ts` (new, 7 tests) — `getTriageTasks`'s filter and
+    newest-first sort in isolation, plus `UPDATE_TASK`-driven removal from the triage set on
+    project assignment, priority change to `Low`, priority change to `High`, and a status move
+    off `Inbox`, each asserting the task itself remains present in `state.tasks` and
+    `archived: false`. `src/views/TasksView.test.tsx` (rewritten, 3 tests, replacing the old
+    project-filter-dropdown test that no longer applies) — untriaged-only filtering, newest-first
+    ordering, and archived-task exclusion. 433 tests passing (up from 424).
+
 ## Latest test results
 
 ```
 npm run test
-Test Files  41 passed (41)
-Tests       424 passed (424)
+Test Files  42 passed (42)
+Tests       433 passed (433)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
@@ -954,16 +978,16 @@ Import choice, and every test file touched by them (`App.test.tsx` new; `CloudSy
 `SyncStatusPanel.test.tsx`, `CloudSyncBanner.test.tsx`, `SettingsView.test.tsx` extended) had
 landed; 400 once the post-migration feature updates above — project archiving,
 `ArchivedProjectsPanel`, the sync-conflict fix's `refreshAcceptingServer`, and the new
-`CalendarView` — each added their own test files/cases; 424 now, after the optional project priority
-ranking feature above added its own test coverage. Re-verified directly by running `npm run
-test` on 2026-09-06.)
+`CalendarView` — each added their own test files/cases; 424 once the optional project priority
+ranking feature added its own test coverage; 433 now, after the Tasks-tab triage-inbox change
+above added its own test coverage. Re-verified directly by running `npm run test` on 2026-09-07.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-8GsZtZ3e.js   539.18 kB
+dist/assets/index-CbQU8vL2.js   537.53 kB
 ```
 
 (Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
@@ -978,12 +1002,14 @@ edits, and the app itself is now gated behind sign-in whenever Supabase is confi
 phase where both are true. Grew to 538.00 kB after the post-migration feature updates above
 (project archiving/`ArchivedProjectsPanel`, the `refreshAcceptingServer` conflict fix, and
 `CalendarView`). Grew to 539.18 kB after the optional project priority ranking feature above.
-Re-verified directly by running `npm run build` on 2026-09-06.)
+Shrank to 537.53 kB with the Tasks-tab triage-inbox change above — `TasksView.tsx` lost its
+search/filter UI and gained only a small selector, a net decrease. Re-verified directly by running
+`npm run build` on 2026-09-07.)
 
 ## Lint
 
 ```
-npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by Phase 5B3C)
+npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by the Tasks-tab triage-inbox change)
 ```
 
 (Re-verified directly by running `npm run lint` on 2026-09-06 — same 4 warnings, still 0 errors.)

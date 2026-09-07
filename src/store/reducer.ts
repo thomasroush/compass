@@ -33,6 +33,19 @@ export function getTasksByStatus(tasks: Task[], status: TaskStatus): Task[] {
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+/**
+ * Tasks still awaiting triage: active, unassigned to any project, at the
+ * default Normal priority, and still sitting in Inbox status. A task drops
+ * out the moment any one of those changes (project assigned, priority set
+ * away from Normal, or status moved off Inbox) — it isn't deleted or
+ * archived, just no longer "untriaged". Sorted newest-created first.
+ */
+export function getTriageTasks(tasks: Task[]): Task[] {
+  return getActiveTasks(tasks)
+    .filter((t) => !t.projectId && t.priority === 'Normal' && t.status === 'Inbox')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 export function getProjectTasks(tasks: Task[], projectId: string): Task[] {
   return tasks
     .filter((t) => t.projectId === projectId && !t.archived)
