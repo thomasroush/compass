@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { CloudSyncBanner } from './CloudSyncBanner';
+import { CopyToAIDialog } from './CopyToAIDialog';
 import { PasswordRecoveryDialog } from './PasswordRecoveryDialog';
 import { QuickAddTask } from './QuickAddTask';
 
@@ -15,6 +17,7 @@ const NAV_ITEMS = [
 
 export function AppShell() {
   const location = useLocation();
+  const [copyToAIOpen, setCopyToAIOpen] = useState(false);
 
   return (
     <div className="app-shell">
@@ -41,6 +44,9 @@ export function AppShell() {
             <img src="/compass_logo.jpg" alt="Daily Compass" className="brand-logo" />
           </div>
           <QuickAddTask />
+          <button type="button" className="secondary" onClick={() => setCopyToAIOpen(true)}>
+            Copy to AI
+          </button>
         </header>
 
         <main className="main-content">
@@ -62,6 +68,7 @@ export function AppShell() {
       </div>
 
       <PasswordRecoveryDialog />
+      {copyToAIOpen && <CopyToAIDialog onClose={() => setCopyToAIOpen(false)} />}
     </div>
   );
 }

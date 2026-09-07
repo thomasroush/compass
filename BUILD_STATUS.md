@@ -957,13 +957,94 @@ migration's scope or status.
     `archived: false`. `src/views/TasksView.test.tsx` (rewritten, 3 tests, replacing the old
     project-filter-dropdown test that no longer applies) — untriaged-only filtering, newest-first
     ordering, and archived-task exclusion. 433 tests passing (up from 424).
+- **Copy to AI (2026-09-07).** A "Copy to AI" button in the top bar (`src/components/AppShell.tsx`,
+  next to the existing quick-add form, visible from every view) opens a dialog that lets the user
+  copy a plain-text/Markdown snapshot of their own tasks and projects to paste into an AI assistant
+  they already use elsewhere. This does **not** connect Compass to an AI: no network request, no
+  API key, no provider selector, no new dependency — the dialog only builds text in memory and
+  offers it to the OS clipboard.
+  - `src/ai/aiSnapshot.ts` — the pure, deterministic formatter,
+    `buildAISnapshot(projects, tasks, scope, generatedAt): string`, built entirely from the app's
+    existing in-memory `Project[]`/`Task[]` (via `useApp()`'s `state`) and reusing existing
+    reducer selectors (`sortProjectsByPriority`, `getTasksByStatus`, `getProjectTasks`) rather than
+    duplicating their filtering/sorting logic. No Supabase import, no network call, no new field on
+    `Task`/`Project`, no schema or migration change.
+    - **Current work** scope: active-status projects only (sorted via the existing
+      `sortProjectsByPriority` — ranked ascending, then unranked alphabetically), each with its
+      non-archived, non-Done tasks (preserving `sortOrder`); an explicit "Unassigned tasks" section
+      for non-archived, non-Done tasks with no project, shown only when non-empty; a project section
+      is likewise shown only when it has at least one eligible task, to avoid empty clutter across
+      many projects.
+    - **Today** scope: a flat list (not grouped by project, per the plan's wording) of exactly the
+      tasks with `status === 'Today'` (via `getTasksByStatus`, which already excludes archived),
+      each line annotated inline with `Project: <name>` or `Project: None` for context.
+    - **One project** scope: the user selects one *active* project; its non-archived tasks are
+      included via the existing `getProjectTasks` selector, in their existing `sortOrder` — Done
+      tasks are included here (unlike Current work), matching the plan's narrower exclusion rule for
+      this scope. An archived or completed project id (even if passed directly, bypassing the
+      dialog's own active-only selector) is treated as "no project selected" — defense in depth, not
+      just a UI-level restriction — so an archived project's tasks can never surface through this
+      scope.
+    - Every scope always excludes archived projects and archived tasks. Every task line is
+      `- [ ] Title | Priority | Due: <date-as-stored> or No due date | Status: <status>` — no
+      internal id, `sortOrder`, `createdAt`, sync metadata, or account/email field ever appears in
+      the output. Due dates are shown exactly as Compass already stores/displays them elsewhere
+      (`YYYY-MM-DD`, the same convention `TaskRow` and the existing Markdown export already use) —
+      no new date-reformatting logic was introduced. The one net-new date format is the snapshot's
+      own "Generated: September 7, 2026, 9:15 AM" line, produced by a small hand-rolled formatter
+      (not `toLocaleString`) so the output is identical regardless of the host machine's locale —
+      required for deterministic tests, and incidentally for deterministic pasted output too. The
+      same state and scope always produce the same text except for that one line.
+  - `src/components/CopyToAIDialog.tsx` — the dialog: a scope selector (radio group: Current work /
+    Today / One project, the last revealing a project `<select>` limited to active projects, matching
+    the project-assignment dropdown's existing convention elsewhere in the app), a live preview
+    (`<textarea readOnly>`, so it is selectable on desktop and mobile per the plan's accessibility
+    requirement, and is always byte-for-byte the same string `handleCopy` sends to the clipboard —
+    there is no separate render path), the plan's exact privacy sentence, and Copy/Cancel buttons.
+    Copy uses `navigator.clipboard.writeText`; on failure (or an unavailable Clipboard API) it shows
+    a plain error message and leaves the (already-selectable) preview untouched rather than failing
+    silently. Built entirely from existing form/dialog CSS classes (`dialog`, `dialog-wide`, `field`,
+    `dialog-actions`, `message`/`message.error`) plus a handful of small new rules in `src/app.css`
+    for the scope fieldset and the preview textarea's monospace sizing — no new UI dependency.
+  - Wired into `src/components/AppShell.tsx`: one `useState` for open/closed, rendered the same way
+    `PasswordRecoveryDialog` already is. No other view, route, or component changed.
+  - Tests: `src/ai/aiSnapshot.test.ts` (27 tests) — the generated-at formatter's exact output
+    (including PM/midnight rollover); per-scope inclusion/exclusion (archived projects, completed
+    projects, archived tasks, Done tasks excluded from Current work but not from One project);
+    unassigned-section presence only when non-empty; ranked-then-alphabetical project ordering;
+    existing-`sortOrder` preservation within a project; every empty-scope case producing a useful
+    message rather than an error or blank output; single-project isolation (never leaking another
+    project's tasks); an archived project never surfacing through One-project scope; and a direct
+    assertion that no internal id, `sortOrder`, or `createdAt` value ever appears in the output.
+    `src/components/CopyToAIDialog.test.tsx` (9 tests, RTL, `navigator.clipboard.writeText` mocked)
+    — the default Current-work preview; the preview changing when Today or One-project is chosen
+    (and, for One-project, strictly excluding the other project); Copy disabled until a project is
+    picked in One-project scope; Copy calling `writeText` with exactly the previewed text and
+    showing the success message; a rejected `writeText` showing an error while the (still-enabled,
+    still-read-only) preview remains selectable; Cancel closing without copying; the privacy
+    sentence's exact text; and the dialog's accessible name. 469 tests passing (up from 433).
+  - **Assumptions/adaptations made explicit, per the plan's own instruction to adapt and explain:**
+    "active, non-archived projects" for Current work was read as `status === 'active'` only
+    (excluding `completed` as well as `archived`) — "current work" reads as ongoing, not wrapped-up,
+    work. "Select one active project" for the One-project scope was likewise read as `status ===
+    'active'` (not just non-archived), matching `TaskForm`'s existing project-assignment dropdown,
+    which already restricts to active-status projects. The "Instructions for my AI" paragraph from
+    the plan's sample structure is included verbatim as fixed copy in every snapshot (not
+    user-editable) — it isn't a per-dialog form field, so there was nothing to build for it beyond
+    the constant string. The privacy sentence appears once, in the dialog UI only (as the plan's
+    "Required user experience" item 5 asks for) — it is not embedded in the copied snapshot text
+    itself, since the plan's own sample snapshot structure doesn't include it there either.
+  - **Not done, out of scope per the plan's explicit non-goals:** no AI API call, provider selector,
+    or API key; no new dependency; no `Task`/`Project` field or Supabase migration; no server
+    function; no analytics or logging of snapshot contents; no import/paste-back path; no change to
+    synchronization, task workflow, or any existing view.
 
 ## Latest test results
 
 ```
 npm run test
-Test Files  42 passed (42)
-Tests       433 passed (433)
+Test Files  44 passed (44)
+Tests       469 passed (469)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
@@ -979,15 +1060,16 @@ Import choice, and every test file touched by them (`App.test.tsx` new; `CloudSy
 landed; 400 once the post-migration feature updates above — project archiving,
 `ArchivedProjectsPanel`, the sync-conflict fix's `refreshAcceptingServer`, and the new
 `CalendarView` — each added their own test files/cases; 424 once the optional project priority
-ranking feature added its own test coverage; 433 now, after the Tasks-tab triage-inbox change
-above added its own test coverage. Re-verified directly by running `npm run test` on 2026-09-07.)
+ranking feature added its own test coverage; 433 once the Tasks-tab triage-inbox change added its
+own test coverage; 469 now, after the Copy to AI feature above added its own formatter and
+interaction tests. Re-verified directly by running `npm run test` on 2026-09-07.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-CbQU8vL2.js   537.53 kB
+dist/assets/index-QQOicI-m.js   543.06 kB
 ```
 
 (Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
@@ -1003,13 +1085,15 @@ phase where both are true. Grew to 538.00 kB after the post-migration feature up
 (project archiving/`ArchivedProjectsPanel`, the `refreshAcceptingServer` conflict fix, and
 `CalendarView`). Grew to 539.18 kB after the optional project priority ranking feature above.
 Shrank to 537.53 kB with the Tasks-tab triage-inbox change above — `TasksView.tsx` lost its
-search/filter UI and gained only a small selector, a net decrease. Re-verified directly by running
-`npm run build` on 2026-09-07.)
+search/filter UI and gained only a small selector, a net decrease. Grew to 543.06 kB with the Copy
+to AI feature above — `src/ai/aiSnapshot.ts` and `src/components/CopyToAIDialog.tsx` are genuinely
+reachable from the shipped app for the first time via `AppShell.tsx`. Re-verified directly by
+running `npm run build` on 2026-09-07.)
 
 ## Lint
 
 ```
-npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by the Tasks-tab triage-inbox change)
+npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by the Copy to AI feature)
 ```
 
-(Re-verified directly by running `npm run lint` on 2026-09-06 — same 4 warnings, still 0 errors.)
+(Re-verified directly by running `npm run lint` on 2026-09-07 — same 4 warnings, still 0 errors.)
