@@ -75,12 +75,15 @@ function validateProject(value: unknown): Project | null {
   if (!isString(p.status) || !(PROJECT_STATUSES as readonly string[]).includes(p.status))
     return null;
   if (p.description !== undefined && !isString(p.description)) return null;
+  if (p.priorityRank !== undefined && (!isNumber(p.priorityRank) || p.priorityRank <= 0))
+    return null;
 
   return {
     id: p.id,
     name: p.name,
     description: p.description,
     status: p.status as Project['status'],
+    priorityRank: p.priorityRank,
   };
 }
 

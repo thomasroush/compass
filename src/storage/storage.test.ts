@@ -285,4 +285,33 @@ describe('validation', () => {
     expect(result.ok).toBe(false);
     expect(loadAppData()).toEqual(data);
   });
+
+  it('accepts a project with a valid positive-integer priorityRank', () => {
+    const data = {
+      ...sampleData(),
+      projects: [{ id: 'p1', name: 'Home', status: 'active', priorityRank: 2 }],
+    };
+    const result = validateAppData(data);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.projects[0].priorityRank).toBe(2);
+  });
+
+  it('accepts a project with no priorityRank at all', () => {
+    const result = validateAppData(sampleData());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.projects[0].priorityRank).toBeUndefined();
+  });
+
+  it('rejects a project with a zero, negative, or non-numeric priorityRank', () => {
+    const base = sampleData();
+    expect(
+      validateAppData({ ...base, projects: [{ id: 'p1', name: 'Home', status: 'active', priorityRank: 0 }] }).ok,
+    ).toBe(false);
+    expect(
+      validateAppData({ ...base, projects: [{ id: 'p1', name: 'Home', status: 'active', priorityRank: -1 }] }).ok,
+    ).toBe(false);
+    expect(
+      validateAppData({ ...base, projects: [{ id: 'p1', name: 'Home', status: 'active', priorityRank: '1' }] }).ok,
+    ).toBe(false);
+  });
 });

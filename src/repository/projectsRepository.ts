@@ -8,7 +8,7 @@ import {
 import { getAuthenticatedSession, getAuthenticatedSessionFor } from './session';
 import { makeError, type CloudProject, type RepositoryResult } from './types';
 
-const PROJECT_COLUMNS = 'id,name,description,status,updated_at';
+const PROJECT_COLUMNS = 'id,name,description,status,priority_rank,updated_at';
 
 export async function listProjects(): Promise<RepositoryResult<CloudProject[]>> {
   const session = await getAuthenticatedSession();
@@ -91,7 +91,7 @@ export async function upsertProject(
 /** See createProject's doc comment for `expectedAccountId`'s role. */
 export async function updateProject(
   id: string,
-  updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>,
+  updates: Partial<Pick<Project, 'name' | 'description' | 'status' | 'priorityRank'>>,
   expectedAccountId: string,
 ): Promise<RepositoryResult<CloudProject>> {
   const session = await getAuthenticatedSessionFor(expectedAccountId);
@@ -128,7 +128,7 @@ export async function updateProject(
  */
 export async function updateProjectGuarded(
   id: string,
-  updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>,
+  updates: Partial<Pick<Project, 'name' | 'description' | 'status' | 'priorityRank'>>,
   expectedUpdatedAt: string,
   expectedAccountId: string,
 ): Promise<RepositoryResult<CloudProject>> {

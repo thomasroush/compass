@@ -43,6 +43,18 @@ export function getVisibleProjects(projects: Project[]): Project[] {
   return projects.filter((p) => p.status !== 'archived');
 }
 
+/**
+ * Projects with a priorityRank sort first, numerically ascending; projects
+ * without one follow, sorted alphabetically by name.
+ */
+export function sortProjectsByPriority(projects: Project[]): Project[] {
+  const ranked = projects.filter((p) => p.priorityRank !== undefined);
+  const unranked = projects.filter((p) => p.priorityRank === undefined);
+  ranked.sort((a, b) => (a.priorityRank! - b.priorityRank!) || a.name.localeCompare(b.name));
+  unranked.sort((a, b) => a.name.localeCompare(b.name));
+  return [...ranked, ...unranked];
+}
+
 export function getArchivedProjects(projects: Project[]): Project[] {
   return projects.filter((p) => p.status === 'archived');
 }
@@ -113,8 +125,16 @@ export type AppAction =
   | { type: 'POSTPONE_DUE'; id: string; days?: number }
   | { type: 'POSTPONE_TO_WEEK'; id: string }
   | { type: 'REORDER_TASK'; id: string; direction: 'up' | 'down' }
-  | { type: 'ADD_PROJECT'; id?: string; name: string; description?: string }
-  | { type: 'UPDATE_PROJECT'; id: string; name?: string; description?: string; status?: Project['status'] }
+  | { type: 'ADD_PROJECT'; id?: string; name: string; description?: string; priorityRank?: number }
+  | {
+      type: 'UPDATE_PROJECT';
+      id: string;
+      name?: string;
+      description?: string;
+      status?: Project['status'];
+      /** `undefined` leaves it unchanged; `null` clears it back to unranked. */
+      priorityRank?: number | null;
+    }
   | { type: 'UPSERT_DAILY_NOTE'; id?: string; date: string; morning?: string; evening?: string }
   | { type: 'IMPORT'; data: AppData }
   | { type: 'RESET' }
@@ -288,6 +308,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
         name,
         description: action.description?.trim() || undefined,
         status: 'active',
+        priorityRank: action.priorityRank,
       };
       return { ...state, projects: [...state.projects, project] };
     }
@@ -304,6 +325,9 @@ export function appReducer(state: AppData, action: AppAction): AppData {
                   ? { description: action.description.trim() || undefined }
                   : {}),
                 ...(action.status !== undefined ? { status: action.status } : {}),
+                ...(action.priorityRank !== undefined
+                  ? { priorityRank: action.priorityRank === null ? undefined : action.priorityRank }
+                  : {}),
               }
             : p,
         ),

@@ -35,6 +35,8 @@ export interface Project {
   name: string;
   description?: string;
   status: ProjectStatus;
+  /** Optional manual ordering rank (1, 2, 3, ...). Unset means unranked. */
+  priorityRank?: number;
 }
 
 export interface DailyNote {

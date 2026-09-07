@@ -162,7 +162,12 @@ async function syncProject(
   if (knownUpdatedAt) {
     result = await updateProjectGuarded(
       id,
-      { name: before.name, description: before.description, status: before.status },
+      {
+        name: before.name,
+        description: before.description,
+        status: before.status,
+        priorityRank: before.priorityRank,
+      },
       knownUpdatedAt,
       accountId,
     );

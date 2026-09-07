@@ -141,6 +141,21 @@ describe('drainDirtyWork — update path (known record) and full-record push', (
     expect(meta.dirty.task).toEqual([]);
   });
 
+  it('uses updateProjectGuarded with priorityRank included in the full-record push', async () => {
+    const p = project({ priorityRank: 2 });
+    dirtyMetadata((m) => markDirty(setRecordUpdatedAt(m, 'project', p.id, 'server-ts-1'), 'project', p.id));
+    projectsRepo.updateProjectGuarded.mockResolvedValue(ok(cloudProject(p, { updatedAt: 'server-ts-2' })));
+
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [p] }));
+
+    expect(projectsRepo.updateProjectGuarded).toHaveBeenCalledWith(
+      p.id,
+      expect.objectContaining({ priorityRank: 2 }),
+      'server-ts-1',
+      ACCOUNT,
+    );
+  });
+
   it('never mistakes a brand-new record for a guarded update requiring a nonexistent cloud version', async () => {
     // No prior setRecordUpdatedAt call at all — this id has never been seen as existing in the cloud.
     const t = task();

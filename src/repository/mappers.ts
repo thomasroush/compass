@@ -10,6 +10,7 @@ export interface ProjectRow {
   name: string;
   description: string | null;
   status: ProjectStatus;
+  priority_rank: number | null;
   updated_at: string;
 }
 
@@ -19,6 +20,7 @@ export function projectFromRow(row: ProjectRow): CloudProject {
     name: row.name,
     description: row.description ?? undefined,
     status: row.status,
+    priorityRank: row.priority_rank ?? undefined,
     updatedAt: row.updated_at,
   };
 }
@@ -29,6 +31,7 @@ export interface ProjectInsertRow {
   name: string;
   description: string | null;
   status: ProjectStatus;
+  priority_rank: number | null;
 }
 
 export function projectToInsertRow(userId: string, project: Project): ProjectInsertRow {
@@ -38,6 +41,7 @@ export function projectToInsertRow(userId: string, project: Project): ProjectIns
     name: project.name,
     description: project.description ?? null,
     status: project.status,
+    priority_rank: project.priorityRank ?? null,
   };
 }
 
@@ -45,10 +49,11 @@ export interface ProjectUpdateRow {
   name?: string;
   description?: string | null;
   status?: ProjectStatus;
+  priority_rank?: number | null;
 }
 
 export function projectUpdatesToRow(
-  updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>,
+  updates: Partial<Pick<Project, 'name' | 'description' | 'status' | 'priorityRank'>>,
 ): ProjectUpdateRow {
   const row: ProjectUpdateRow = {};
   // `in` (not `!== undefined`) distinguishes "field omitted" (leave unchanged)
@@ -58,6 +63,7 @@ export function projectUpdatesToRow(
   if ('name' in updates) row.name = updates.name;
   if ('description' in updates) row.description = updates.description ?? null;
   if ('status' in updates) row.status = updates.status;
+  if ('priorityRank' in updates) row.priority_rank = updates.priorityRank ?? null;
   return row;
 }
 

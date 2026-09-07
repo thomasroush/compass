@@ -900,13 +900,46 @@ migration's scope or status.
   postpone actions, identical to how `TaskRow` behaves on Today/Board/Tasks. If a genuinely
   view-only calendar is wanted, that would be a follow-up change to pass a read-only mode into
   `TaskRow` (or render a simpler summary row) — not yet built.
+- **Optional project priority ranking (2026-09-06).** `Project` (`src/types.ts`) gained an optional
+  `priorityRank?: number`, editable from `ProjectsView`'s existing edit-project dialog (a new
+  "Priority (optional)" number field alongside name/description) — not exposed on the add-project
+  form, per request. `ProjectsView`'s project list now sorts via a new `sortProjectsByPriority`
+  (`src/store/reducer.ts`): projects with a `priorityRank` first, ascending numerically (ties broken
+  alphabetically), then every unranked project alphabetically by name — unchanged from before for any
+  project that is never given a priority. A project's `priorityRank` is shown as a small "Priority N"
+  badge next to its status badge. `UPDATE_PROJECT` treats `priorityRank: undefined` as "leave
+  unchanged" and `priorityRank: null` as "clear back to unranked," matching the existing
+  omitted-vs-explicit convention other project fields already use elsewhere in the codebase.
+  `ArchivedProjectsPanel`'s own by-name sort, Board/Calendar/Tasks, task-selection dropdowns,
+  authentication, and every other sync workflow are unchanged.
+  - Persists through the full existing local/Supabase pipeline, following the same pattern already
+    used for `description`: `src/storage/validation.ts` (accepts a positive integer or absence,
+    rejects zero/negative/non-numeric), `src/repository/mappers.ts`/`projectsRepository.ts` (new
+    `priority_rank` column, mapped both ways, included in `updateProject`/`updateProjectGuarded`'s
+    allowed fields), and the two other places that build an explicit project update payload —
+    `src/sync/drainSync.ts`'s full-record push and `src/sync/linkingChoice.ts`'s "Keep this device's
+    data" resolution — both updated to include it. No other sync file needed a change: hydration,
+    refresh-from-cloud, and migration all pass whole `Project` objects through generically.
+  - **New Supabase migration, not yet run:** `supabase/migrations/20260906120000_add_project_priority_rank.sql`
+    adds `priority_rank integer` (nullable, `check (priority_rank is null or priority_rank > 0)`) to
+    `public.projects`. Prepared for review only, per this session's explicit instruction — not applied
+    to the live project. Until it is run, the app works fully locally (and for any signed-in
+    unconfigured/local-only use); a signed-in device's sync engine will retry setting `priority_rank`
+    against the live table until this migration is applied there.
+  - Tests: `src/store/reducer.projectPriority.test.ts` (new — `ADD_PROJECT`/`UPDATE_PROJECT`
+    set/clear/leave-unchanged behavior, `sortProjectsByPriority`'s ordering and tie-breaking),
+    `src/storage/storage.test.ts` (+3, validation accept/reject cases), `src/repository/mappers.test.ts`
+    (+4), `src/repository/projectsRepository.test.ts` (+3, plus 2 existing insert/upsert assertions
+    updated for the new column), `src/sync/drainSync.test.ts` (+1), `src/views/ProjectsView.test.tsx`
+    (+5 — sort order, badge visibility, set/clear via the edit dialog, and pre-fill on open). 424 tests
+    passing (up from 400).
 
 ## Latest test results
 
 ```
 npm run test
-Test Files  40 passed (40)
-Tests       400 passed (400)
+Test Files  41 passed (41)
+Tests       424 passed (424)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
@@ -919,9 +952,10 @@ correction landed with its own tests, before 5B3B was committed (commit `3d2086b
 Phase 5B3C's login gate, `LinkingChoice`/`linkingChoice.ts`, `refreshFromCloud.ts`, the signed-in
 Import choice, and every test file touched by them (`App.test.tsx` new; `CloudSyncContext.test.tsx`,
 `SyncStatusPanel.test.tsx`, `CloudSyncBanner.test.tsx`, `SettingsView.test.tsx` extended) had
-landed; 400 now, after the post-migration feature updates above — project archiving,
+landed; 400 once the post-migration feature updates above — project archiving,
 `ArchivedProjectsPanel`, the sync-conflict fix's `refreshAcceptingServer`, and the new
-`CalendarView` each added their own test files/cases. Re-verified directly by running `npm run
+`CalendarView` — each added their own test files/cases; 424 now, after the optional project priority
+ranking feature above added its own test coverage. Re-verified directly by running `npm run
 test` on 2026-09-06.)
 
 ## Latest build results
@@ -929,7 +963,7 @@ test` on 2026-09-06.)
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-D0MG7R9T.js   538.00 kB
+dist/assets/index-8GsZtZ3e.js   539.18 kB
 ```
 
 (Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
@@ -943,7 +977,8 @@ shipped entry point for the first time. Cloud writes are live for signed-in, *li
 edits, and the app itself is now gated behind sign-in whenever Supabase is configured — the first
 phase where both are true. Grew to 538.00 kB after the post-migration feature updates above
 (project archiving/`ArchivedProjectsPanel`, the `refreshAcceptingServer` conflict fix, and
-`CalendarView`). Re-verified directly by running `npm run build` on 2026-09-06.)
+`CalendarView`). Grew to 539.18 kB after the optional project priority ranking feature above.
+Re-verified directly by running `npm run build` on 2026-09-06.)
 
 ## Lint
 

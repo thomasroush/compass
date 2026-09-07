@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { useApp } from '../store/useApp';
-import { getProjectTasks, getVisibleProjects } from '../store/reducer';
+import { getProjectTasks, getVisibleProjects, sortProjectsByPriority } from '../store/reducer';
 import { TaskRow } from '../components/TaskRow';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { Project, ProjectStatus } from '../types';
@@ -13,9 +13,10 @@ export function ProjectsView() {
   const [editing, setEditing] = useState<Project | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editPriority, setEditPriority] = useState('');
   const [archiving, setArchiving] = useState<Project | null>(null);
 
-  const sorted = getVisibleProjects(state.projects).sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = sortProjectsByPriority(getVisibleProjects(state.projects));
 
   function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -29,16 +30,24 @@ export function ProjectsView() {
     setEditing(project);
     setEditName(project.name);
     setEditDescription(project.description ?? '');
+    setEditPriority(project.priorityRank !== undefined ? String(project.priorityRank) : '');
   }
 
   function saveEdit(e: FormEvent) {
     e.preventDefault();
     if (!editing || !editName.trim()) return;
+    const trimmedPriority = editPriority.trim();
+    const parsedPriority = trimmedPriority === '' ? NaN : Number(trimmedPriority);
+    const priorityRank =
+      trimmedPriority !== '' && Number.isInteger(parsedPriority) && parsedPriority > 0
+        ? parsedPriority
+        : null;
     dispatch({
       type: 'UPDATE_PROJECT',
       id: editing.id,
       name: editName,
       description: editDescription,
+      priorityRank,
     });
     setEditing(null);
   }
@@ -98,6 +107,9 @@ export function ProjectsView() {
                   <div>
                     <h2>{project.name}</h2>
                     <span className="badge">{project.status}</span>
+                    {project.priorityRank !== undefined && (
+                      <span className="badge priority">Priority {project.priorityRank}</span>
+                    )}
                     {project.description && (
                       <p className="project-desc">{project.description}</p>
                     )}
@@ -190,6 +202,18 @@ export function ProjectsView() {
                   type="text"
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="edit-project-priority">Priority (optional)</label>
+                <input
+                  id="edit-project-priority"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={editPriority}
+                  onChange={(e) => setEditPriority(e.target.value)}
+                  placeholder="Unranked"
                 />
               </div>
               <div className="dialog-actions">

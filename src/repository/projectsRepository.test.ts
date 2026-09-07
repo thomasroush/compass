@@ -154,6 +154,7 @@ describe('createProject', () => {
       name: 'Home',
       description: 'desc',
       status: 'active',
+      priority_rank: null,
     });
     expect(result).toEqual({
       ok: true,
@@ -225,6 +226,21 @@ describe('updateProject', () => {
     if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
   });
+
+  it('sends priorityRank as priority_rank, and an explicit undefined as null (clearing it)', async () => {
+    signIn('user-1');
+    const builder = makeBuilder({
+      data: { id: 'p1', name: 'Home', description: null, status: 'active', priority_rank: 1, updated_at: 'ts2' },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    await updateProject('p1', { priorityRank: 1 }, 'user-1');
+    expect(builder.update).toHaveBeenCalledWith({ priority_rank: 1 });
+
+    await updateProject('p1', { priorityRank: undefined }, 'user-1');
+    expect(builder.update).toHaveBeenCalledWith({ priority_rank: null });
+  });
 });
 
 describe('upsertProject', () => {
@@ -240,7 +256,14 @@ describe('upsertProject', () => {
     const result = await upsertProject(project, 'user-1');
 
     expect(builder.upsert).toHaveBeenCalledWith(
-      { id: 'existing-id-123', user_id: 'user-1', name: 'Home', description: null, status: 'active' },
+      {
+        id: 'existing-id-123',
+        user_id: 'user-1',
+        name: 'Home',
+        description: null,
+        status: 'active',
+        priority_rank: null,
+      },
       { onConflict: 'user_id,id' },
     );
     expect(result.ok).toBe(true);
@@ -324,6 +347,18 @@ describe('updateProjectGuarded', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
+  });
+
+  it('sends priorityRank as priority_rank', async () => {
+    signIn('user-1');
+    const builder = makeBuilder({
+      data: { id: 'p1', name: 'Home', description: null, status: 'active', priority_rank: 3, updated_at: 'ts2' },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    await updateProjectGuarded('p1', { priorityRank: 3 }, 'ts1', 'user-1');
+    expect(builder.update).toHaveBeenCalledWith({ priority_rank: 3 });
   });
 });
 

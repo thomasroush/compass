@@ -19,6 +19,7 @@ describe('project mapping', () => {
       name: 'Home',
       description: 'Household tasks',
       status: 'active',
+      priority_rank: 2,
       updated_at: '2026-08-30T00:00:00.000Z',
     });
     expect(cloud).toEqual({
@@ -26,6 +27,7 @@ describe('project mapping', () => {
       name: 'Home',
       description: 'Household tasks',
       status: 'active',
+      priorityRank: 2,
       updatedAt: '2026-08-30T00:00:00.000Z',
     });
   });
@@ -36,12 +38,25 @@ describe('project mapping', () => {
       name: 'Home',
       description: null,
       status: 'active',
+      priority_rank: null,
       updated_at: 'ts',
     });
     expect(cloud.description).toBeUndefined();
   });
 
-  it('builds an insert row scoped to the given user id, with an undefined description as null', () => {
+  it('maps a null priority_rank to undefined, not null', () => {
+    const cloud = projectFromRow({
+      id: 'p1',
+      name: 'Home',
+      description: null,
+      status: 'active',
+      priority_rank: null,
+      updated_at: 'ts',
+    });
+    expect(cloud.priorityRank).toBeUndefined();
+  });
+
+  it('builds an insert row scoped to the given user id, with an undefined description/priorityRank as null', () => {
     const project: Project = { id: 'p1', name: 'Home', status: 'active' };
     expect(projectToInsertRow('user-1', project)).toEqual({
       id: 'p1',
@@ -49,13 +64,24 @@ describe('project mapping', () => {
       name: 'Home',
       description: null,
       status: 'active',
+      priority_rank: null,
     });
+  });
+
+  it('builds an insert row carrying priorityRank through as priority_rank', () => {
+    const project: Project = { id: 'p1', name: 'Home', status: 'active', priorityRank: 1 };
+    expect(projectToInsertRow('user-1', project).priority_rank).toBe(1);
   });
 
   it('builds an update row containing only the fields that were provided', () => {
     expect(projectUpdatesToRow({ name: 'Renamed' })).toEqual({ name: 'Renamed' });
     expect(projectUpdatesToRow({ status: 'archived' })).toEqual({ status: 'archived' });
     expect(projectUpdatesToRow({})).toEqual({});
+  });
+
+  it('maps priorityRank updates to priority_rank, and an explicit undefined to null (clearing it)', () => {
+    expect(projectUpdatesToRow({ priorityRank: 3 })).toEqual({ priority_rank: 3 });
+    expect(projectUpdatesToRow({ priorityRank: undefined })).toEqual({ priority_rank: null });
   });
 });
 

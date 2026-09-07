@@ -315,6 +315,13 @@ a:focus-visible {
   color: var(--accent);
 }
 
+.badge.priority {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-left: 0.4rem;
+}
+
 .calendar-day-heading {
   display: flex;
   align-items: center;

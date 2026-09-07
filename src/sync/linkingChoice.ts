@@ -172,7 +172,12 @@ export async function applyKeepLocalData(
   }
 
   await resolveDiffering<Project>('project', comparison.differing.project, local.projects, cloud.projects, (id, r, ts) =>
-    updateProjectGuarded(id, { name: r.name, description: r.description, status: r.status }, ts, accountId),
+    updateProjectGuarded(
+      id,
+      { name: r.name, description: r.description, status: r.status, priorityRank: r.priorityRank },
+      ts,
+      accountId,
+    ),
   );
   await resolveDiffering<Task>('task', comparison.differing.task, local.tasks, cloud.tasks, (id, r, ts) => {
     const { id: _id, createdAt: _createdAt, ...updates } = r as Task;
