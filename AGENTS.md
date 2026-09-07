@@ -15,7 +15,7 @@ Daily Compass is a simple personal task-management website for one user. It shou
 
 The application must remain non-AI and must not use an AI API, paid service, or analytics.
 
-Cloud data storage and sync via Supabase — including Supabase authentication, which is required for it — is a permitted, in-progress exception to the app's original local-only design (approved 2026-08-29; authentication requirement made explicit 2026-08-29). See "Cloud Sync (Supabase)" below for the full rules governing that integration, and `SUPABASE_IMPLEMENTATION_PLAN.md` for the phased build plan. No other backend, database, login system, or cloud data service may be added.
+Cloud data storage and sync via Supabase — including Supabase authentication, which is required for it — is a permitted exception to the app's original local-only design (approved 2026-08-29; authentication requirement made explicit 2026-08-29). This migration is complete and live in production: authentication, cloud persistence, and account-bound cross-device sync are active in the shipped app (see `BUILD_STATUS.md` and `SUPABASE_IMPLEMENTATION_PLAN.md`). See "Cloud Sync (Supabase)" below for the full rules governing that integration — these are permanent maintenance rules, not phase-specific build steps — and `SUPABASE_IMPLEMENTATION_PLAN.md` for the phased build history. No other backend, database, login system, or cloud data service may be added.
 
 ## How Claude Code Should Work
 
@@ -99,7 +99,7 @@ Create stable IDs for saved records. Validate saved or imported data before repl
 
 ## Cloud Sync (Supabase)
 
-Cloud storage and sync via a single, already-provisioned Supabase project is in progress, approved as an exception to the original local-only design (approved 2026-08-29; corrected 2026-08-29 — see `SUPABASE_IMPLEMENTATION_PLAN.md` for phased detail). Signed-in cloud sync is the intended architecture, supporting private cross-device access and, later, potentially additional users. These requirements are permanent, not phase-specific:
+Cloud storage and sync via a single, already-provisioned Supabase project is complete and live in production, approved as an exception to the original local-only design (approved 2026-08-29; corrected 2026-08-29 — see `SUPABASE_IMPLEMENTATION_PLAN.md` for phased detail and `BUILD_STATUS.md` for the completed build and verification record). Signed-in cloud sync is the intended architecture, supporting private cross-device access and, later, potentially additional users. These requirements are permanent, not phase-specific:
 
 - Supabase authentication is required before any cloud task data can be read or written. There is no anonymous or single-shared-account mode.
 - Each user must have an individual account and an authenticated user ID (`auth.uid()`).

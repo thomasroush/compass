@@ -4,6 +4,18 @@ This plan governs adding authenticated cloud sync to Daily Compass via Supabase.
 
 Each phase below is a separate, reviewable unit of work. **Do not start a phase before the previous one is complete and verified.** Phases 1–3 have been implemented (Phase 2's manual cross-account verification is still outstanding — see that section); Phase 3's production auth flows have since been manually confirmed end-to-end on both localhost and the deployed Vercel URL. Phase 4's repository layer (the read/write primitives) is built and tested, and is now activated for three purposes — Phase 5A's explicit, user-confirmed local-to-cloud migration, manually verified against the production Supabase project (2026-08-31); Phase 5B2's read-only cloud hydration; and, as of Phase 5B3B, automatic account-bound write-back of ordinary signed-in edits. Phase 5B (two-way synchronization) is staged as 5B1–5B3 under its own approved architecture decisions; 5B1 (internal foundations), 5B2 (signed-in cloud hydration, read-only), 5B3A (account-affinity/provenance/dirty-tracking foundations), and 5B3B (automatic cloud write-back) are all complete. **5B3C (login-first gate, interactive linking UI, returning-device safe refresh, and signed-in Import cloud-push) is now also complete** — see the "Phase 5B3C" section below and `BUILD_STATUS.md` → "Phase 5B3C" for full detail. This also lands the login-gating and startup cloud-hydration behavior that was explicitly deferred through 5B3B. Phases 6–7 are still just described below; Phase 6's cross-device propagation and offline/conflict behavior are now exercisable for the first time, since 5B3C is the point real writes, conflicts, and linking are all present together.
 
+**Status: historical / largely complete.** Phases 1 through 5B3C — client connection, schema and
+RLS, authentication, the repository layer, explicit migration, read-only hydration, account-bound
+automatic write-back, and the login-first gate with interactive linking/conflict resolution — are
+complete and have been verified against the production Supabase project, including a real
+cross-device round trip (see `BUILD_STATUS.md` → "Migration status: complete"). This document is
+now kept primarily as the historical record of the phased design and the architecture decisions
+that governed it, not an active build checklist. The genuinely unfinished items are: Phase 2's
+manual cross-account RLS verification (reviewed and documented, deliberately not yet executed
+against the live project — see that section); and Phases 6–7 (cross-device/security/offline/conflict
+testing, and confirming ordinary redeployments don't affect existing data) — see the Status table at
+the end of this file for the current state of each.
+
 ## Guiding constraints (apply to every phase)
 
 - No cloud data may be read or written by an unauthenticated user.

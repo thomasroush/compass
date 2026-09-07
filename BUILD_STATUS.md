@@ -856,12 +856,57 @@ migration's scope.
 
 See `SUPABASE_IMPLEMENTATION_PLAN.md` for full detail. Phase 7's Vercel env var configuration and basic redirect verification are effectively done (see the production-auth confirmation note above); its "ordinary redeployment doesn't affect existing data" check is still open.
 
+## Post-migration feature updates (2026-09-02 to 2026-09-04)
+
+Application features built after the Supabase migration closed out above. None of this changes the
+migration's scope or status.
+
+- **Project archiving (complete, commit `151bb24`).** `ProjectsView` gained an explicit "Archive"
+  action (confirmed via `ConfirmDialog`) alongside the existing "Mark completed"/"Mark active"
+  status controls. Archiving hides a project from `ProjectsView`, task-selection dropdowns, and
+  project filters (`getVisibleProjects` in `src/store/reducer.ts`) without deleting it.
+  `src/components/ArchivedProjectsPanel.tsx`, mounted in Settings above "Data storage", lists
+  archived projects and offers "Restore" (routes through the same `UPDATE_PROJECT` action
+  `ProjectsView` already uses). No permanent project deletion exists anywhere in the app.
+- **JSON import hidden from the UI, not removed (same commit).** `SettingsView.tsx`'s "Import"
+  section is now rendered with the `hidden` attribute (removed from view, focus order, and the
+  accessibility tree) per request. The underlying import logic (`handleImportFile`, `confirmImport`,
+  and both the signed-out/signed-in confirmation dialogs) is deliberately left intact and reachable
+  in code — see the comment directly above that section in `SettingsView.tsx` — so this is a UI
+  visibility change, not a feature removal. Export (JSON backup and Markdown) is unchanged.
+- **Sync-conflict fix: stuck dirty+conflicted records (complete, commit `7198c1b`).** Added
+  `refreshAcceptingServer` to `CloudSyncContext`, wired to `SyncStatusPanel`'s existing "Refresh from
+  cloud" button in place of plain `retry()`. Previously, a record that was both locally dirty and in
+  server-side conflict (its known `updated_at` baseline no longer matched the cloud row, so the
+  drain loop's guarded update could never succeed against it) had no path back to a synced state.
+  `refreshAcceptingServer` accepts the server's version for such a record, updates local state, and
+  clears the stuck dirty entry — an ordinary dirty-but-not-yet-conflicted record, or a plain sign-in
+  refresh, is unaffected and still goes through the normal drain path. Covered by new tests in
+  `CloudSyncContext.test.tsx`, `SyncStatusPanel.test.tsx`, and `CloudSyncBanner.test.tsx`.
+- **Board layout (commits `8c9c445`, `0f47cfa`, `b317458`).** `BoardView` renders the Inbox column
+  full-width in its own row, with the other five statuses (This Week, Today, In Progress, Waiting,
+  Done) in a responsive row below — reworked for better small-screen behavior, then given status
+  colors and other visual accents in `app.css`. No structural or data-model change; still the same
+  six statuses from `AGENTS.md`.
+- **Daily Compass logo (commit `0f47cfa`).** `public/compass_logo.jpg` added and rendered in
+  `AppShell.tsx`'s sidebar brand block and mobile top bar (`<img src="/compass_logo.jpg" alt="Daily
+  Compass" className="brand-logo" />`), replacing the earlier text-only brand mark.
+- **Calendar view (commit `d55eec7`) — chronological, not read-only.** A new `/calendar` route
+  (`src/views/CalendarView.tsx`) lists all tasks with a due date, grouped and headed by date
+  (overdue dates flagged), reusing `getTasksGroupedByDueDate` (`src/store/reducer.ts`) and the same
+  `TaskRow` component used elsewhere. **Correction to how this was described when requested:** the
+  view is not read-only — `TaskRow` gives every listed task its full normal action set (Complete/
+  Reopen, Edit, Archive, the status selector), plus primary-toggle for `Today`-status tasks and
+  postpone actions, identical to how `TaskRow` behaves on Today/Board/Tasks. If a genuinely
+  view-only calendar is wanted, that would be a follow-up change to pass a read-only mode into
+  `TaskRow` (or render a simpler summary row) — not yet built.
+
 ## Latest test results
 
 ```
 npm run test
-Test Files  34 passed (34)
-Tests       368 passed (368)
+Test Files  40 passed (40)
+Tests       400 passed (400)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
@@ -870,18 +915,21 @@ extended; 251 once Phase 5B3A task 3's provenance/dirty-marking/generation scaff
 first landed; 261 once the REORDER_TASK/enforcePrimaryCap cascading-mutation correction landed,
 before task 3 was ever committed; 295 once Phase 5B3B's drain loop, sync engine, and durable dirty
 tracking first landed; 325 once the Risk 1 (duplicate-create) and Risk 2 (account-linking gate)
-correction landed with its own tests, before 5B3B was committed (commit `3d2086b`); 368 now that
+correction landed with its own tests, before 5B3B was committed (commit `3d2086b`); 368 once
 Phase 5B3C's login gate, `LinkingChoice`/`linkingChoice.ts`, `refreshFromCloud.ts`, the signed-in
 Import choice, and every test file touched by them (`App.test.tsx` new; `CloudSyncContext.test.tsx`,
-`SyncStatusPanel.test.tsx`, `CloudSyncBanner.test.tsx`, `SettingsView.test.tsx` extended) has
-landed.)
+`SyncStatusPanel.test.tsx`, `CloudSyncBanner.test.tsx`, `SettingsView.test.tsx` extended) had
+landed; 400 now, after the post-migration feature updates above — project archiving,
+`ArchivedProjectsPanel`, the sync-conflict fix's `refreshAcceptingServer`, and the new
+`CalendarView` each added their own test files/cases. Re-verified directly by running `npm run
+test` on 2026-09-06.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-BFqOAtxU.js   535.11 kB
+dist/assets/index-D0MG7R9T.js   538.00 kB
 ```
 
 (Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
@@ -893,10 +941,14 @@ again to 534.96 kB with Phase 5B3C — `LinkingChoice.tsx`/`linkingChoice.ts`, `
 `LoginScreen.tsx`/`LoadingScreen.tsx`, and `App.tsx`'s gate are all genuinely reachable from the
 shipped entry point for the first time. Cloud writes are live for signed-in, *linked* ordinary
 edits, and the app itself is now gated behind sign-in whenever Supabase is configured — the first
-phase where both are true.)
+phase where both are true. Grew to 538.00 kB after the post-migration feature updates above
+(project archiving/`ArchivedProjectsPanel`, the `refreshAcceptingServer` conflict fix, and
+`CalendarView`). Re-verified directly by running `npm run build` on 2026-09-06.)
 
 ## Lint
 
 ```
 npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by Phase 5B3C)
 ```
+
+(Re-verified directly by running `npm run lint` on 2026-09-06 — same 4 warnings, still 0 errors.)
