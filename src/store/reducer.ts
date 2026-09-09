@@ -165,6 +165,29 @@ export function getGoalProgress(goal: Goal, targets: Target[], tasks: Task[]): n
   return clamp01(sum / visible.length / 100) * 100;
 }
 
+function formatWithCommas(n: number): string {
+  const sign = n < 0 ? '-' : '';
+  const digits = String(Math.round(Math.abs(n)));
+  return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/**
+ * Displays a numeric Target's value per its own format/unit — shared by the
+ * Goals UI and the Copy to AI formatter (src/ai/aiSnapshot.ts) so value
+ * display isn't duplicated. Deliberately hand-rolled rather than
+ * `toLocaleString`, matching aiSnapshot.ts's own determinism requirement
+ * (identical output regardless of host locale) — this function must stay
+ * safe to call from there.
+ */
+export function formatTargetValue(value: number, target: Extract<Target, { type: 'numeric' }>): string {
+  if (target.valueFormat === 'currency') {
+    return `$${formatWithCommas(value)}`;
+  }
+  const rounded = Math.round(value * 100) / 100;
+  const display = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
+  return target.unit ? `${display} ${target.unit}` : display;
+}
+
 export function getDailyNoteForDate(notes: DailyNote[], date: string): DailyNote | undefined {
   return notes.find((n) => n.date === date);
 }

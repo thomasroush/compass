@@ -110,7 +110,11 @@ export function LinkingChoice() {
     saveSyncMetadataStore(upsertAccountMetadata(store, markEstablished(outcome.metadata)));
     setWorking(false);
     const hasDeferred =
-      outcome.deferred.project.length > 0 || outcome.deferred.task.length > 0 || outcome.deferred.dailyNote.length > 0;
+      outcome.deferred.project.length > 0 ||
+      outcome.deferred.task.length > 0 ||
+      outcome.deferred.dailyNote.length > 0 ||
+      outcome.deferred.goal.length > 0 ||
+      outcome.deferred.target.length > 0;
     if (hasDeferred) {
       setDeferredNote(outcome.deferred);
       return;
@@ -123,7 +127,8 @@ export function LinkingChoice() {
     cloudSync.retry();
   }
 
-  const counts = (c: LinkingComparison['localOnly']) => c.project.length + c.task.length + c.dailyNote.length;
+  const counts = (c: LinkingComparison['localOnly']) =>
+    c.project.length + c.task.length + c.dailyNote.length + c.goal.length + c.target.length;
 
   return (
     <div className="dialog-backdrop" role="presentation">
@@ -204,9 +209,9 @@ export function LinkingChoice() {
         {confirming === 'use-cloud' && (
           <>
             <p className="message error" role="alert">
-              This replaces every task, project, and daily note on this device with what is
-              currently in your account. Anything on this device that is not already in your
-              account will be lost.
+              This replaces every task, project, daily note, goal, and target on this device with
+              what is currently in your account. Anything on this device that is not already in
+              your account will be lost.
             </p>
             <div className="dialog-actions">
               <button type="button" className="secondary" onClick={() => exportJsonBackup(state)} disabled={working}>
@@ -244,8 +249,13 @@ export function LinkingChoice() {
           <>
             <p className="message" role="status">
               This device is now linked. Most records were saved to your account immediately;{' '}
-              {deferredNote.project.length + deferredNote.task.length + deferredNote.dailyNote.length} could not be
-              confirmed right away and will sync automatically the next time this device syncs.
+              {deferredNote.project.length +
+                deferredNote.task.length +
+                deferredNote.dailyNote.length +
+                deferredNote.goal.length +
+                deferredNote.target.length}{' '}
+              could not be confirmed right away and will sync automatically the next time this
+              device syncs.
             </p>
             <div className="dialog-actions">
               <button type="button" onClick={closeAfterDeferred}>

@@ -95,7 +95,11 @@ button:disabled {
   cursor: not-allowed;
 }
 
-input,
+/* Excludes checkbox/radio: without this, the bare `input` selector below
+   gives every checkbox a text-input border/padding/background and stretches
+   it to 100% width — invisible until this app's first real checkbox (Goals
+   feature) was added, since no earlier form used type="checkbox"/"radio". */
+input:not([type='checkbox']):not([type='radio']),
 select,
 textarea {
   border: 1px solid var(--border);
@@ -322,6 +326,34 @@ a:focus-visible {
   margin-left: 0.4rem;
 }
 
+/* Goal status colors reuse the existing Board status accent variables
+   rather than introducing new ones — active/achieved/paused/abandoned map
+   onto the same in-progress/done/waiting/inbox visual language already used
+   for Task status. */
+.badge.goal-active {
+  border-color: var(--status-progress);
+  background: var(--status-progress-bg);
+  color: var(--status-progress);
+}
+
+.badge.goal-achieved {
+  border-color: var(--status-done);
+  background: var(--status-done-bg);
+  color: var(--status-done);
+}
+
+.badge.goal-paused {
+  border-color: var(--status-waiting);
+  background: var(--status-waiting-bg);
+  color: var(--status-waiting);
+}
+
+.badge.goal-abandoned {
+  border-color: var(--status-inbox);
+  background: var(--status-inbox-bg);
+  color: var(--status-inbox);
+}
+
 .calendar-day-heading {
   display: flex;
   align-items: center;
@@ -362,11 +394,70 @@ a:focus-visible {
   color: var(--muted);
 }
 
+/* `.checkbox-field label` covers a wrapper-with-nested-label usage; every
+   actual usage puts both classes directly on the <label> itself
+   (`<label className="field checkbox-field">`), which the descendant
+   selector never matched — that label kept .field's flex-direction:column,
+   stacking the checkbox above its text instead of beside it. Matching
+   `.checkbox-field` itself fixes this without any markup change. */
+.checkbox-field,
 .checkbox-field label {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
   color: var(--text);
+}
+
+/* Straightforward scrollable checkbox list — used for the Goal-Project and
+   Target-Task pickers. No search/picker library. */
+.checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+.progress-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.progress-bar-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-width: 2.5rem;
+  text-align: right;
+}
+
+.progress-empty {
+  font-style: italic;
+  margin: 0.35rem 0;
+}
+
+/* The only visual cue this app needs for an archived Target — reused on the
+   existing .task-row shell rather than introducing separate target styles. */
+.task-row.archived {
+  opacity: 0.6;
 }
 
 .filters {
@@ -533,7 +624,8 @@ a:focus-visible {
   align-items: flex-start;
 }
 
-.project-tasks {
+.project-tasks,
+.project-goals {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
@@ -592,6 +684,7 @@ a:focus-visible {
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  overflow-y: auto;
   z-index: 100;
 }
 
@@ -603,6 +696,14 @@ a:focus-visible {
   max-width: 420px;
   border: 1px solid var(--border);
   box-shadow: 0 8px 24px rgba(28, 25, 23, 0.14);
+  /* Auto top/bottom margin centers the dialog when it fits (same as
+     align-items: center above) but collapses to 0 — flush to the top,
+     scrollable via .dialog-backdrop's overflow-y — once content is taller
+     than the viewport. Without this, a dialog taller than the screen keeps
+     being vertically centered by align-items, pushing its top (and,
+     depending on exact height, its action row) above or below the visible
+     area with no way to scroll to it. */
+  margin: auto 0;
 }
 
 .dialog-wide {
@@ -629,6 +730,20 @@ a:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* Groups a couple of short fields (e.g. Due date + Priority) side by side
+   inside a .stack-form on desktop, using the dialog's horizontal space
+   instead of one full-width field per row. Stacks back to a column on
+   mobile via the existing 768px breakpoint below. */
+.field-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.field-row > .field {
+  flex: 1;
+  min-width: 0;
 }
 
 .copy-ai-scope-fieldset {
@@ -816,6 +931,10 @@ code {
   }
 
   .view-header-row {
+    flex-direction: column;
+  }
+
+  .field-row {
     flex-direction: column;
   }
 

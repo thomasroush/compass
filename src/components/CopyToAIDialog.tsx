@@ -26,8 +26,8 @@ export function CopyToAIDialog({ onClose }: CopyToAIDialogProps) {
   }, [scopeType, projectId]);
 
   const previewText = useMemo(
-    () => buildAISnapshot(state.projects, state.tasks, scope, generatedAt),
-    [state.projects, state.tasks, scope, generatedAt],
+    () => buildAISnapshot(state.projects, state.tasks, state.goals, state.targets, scope, generatedAt),
+    [state.projects, state.tasks, state.goals, state.targets, scope, generatedAt],
   );
 
   function changeScope(next: CopyToAIScope['type']) {

@@ -1,8 +1,17 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { ProjectsView } from './ProjectsView';
 import { createEmptyAppData, type AppData } from '../types';
+
+function renderWithRouter() {
+  return render(
+    <MemoryRouter>
+      <ProjectsView />
+    </MemoryRouter>,
+  );
+}
 
 const mocks = vi.hoisted(() => ({
   appState: {
@@ -169,5 +178,76 @@ describe('ProjectsView — priority ranking', () => {
     expect((within(dialog).getByLabelText('Priority (optional)') as HTMLInputElement).value).toBe(
       '5',
     );
+  });
+});
+
+describe('ProjectsView — linked goals (read-only)', () => {
+  it('shows a linked goal, with its status and progress, only once the project is expanded', () => {
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      projects: [{ id: 'active-1', name: 'Website revamp', status: 'active' }],
+      goals: [
+        {
+          id: 'g1',
+          name: 'Grow revenue',
+          priority: 'Normal',
+          status: 'active',
+          projectIds: ['active-1'],
+        },
+      ],
+      targets: [
+        {
+          id: 't1',
+          goalId: 'g1',
+          name: 'Milestone',
+          sortOrder: 0,
+          archived: false,
+          type: 'yesno',
+          achieved: true,
+        },
+      ],
+    };
+    renderWithRouter();
+
+    expect(screen.queryByText('Grow revenue')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show tasks' }));
+
+    const goalsSection = screen.getByText('Linked goals').closest('.project-goals') as HTMLElement;
+    expect(within(goalsSection).getByText('Grow revenue')).toBeTruthy();
+    expect(within(goalsSection).getByText('active')).toBeTruthy();
+    expect(within(goalsSection).getByText('100%')).toBeTruthy();
+  });
+
+  it('links the goal name to its detail page', () => {
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      projects: [{ id: 'active-1', name: 'Website revamp', status: 'active' }],
+      goals: [{ id: 'g1', name: 'Grow revenue', priority: 'Normal', status: 'active', projectIds: ['active-1'] }],
+    };
+    renderWithRouter();
+    fireEvent.click(screen.getByRole('button', { name: 'Show tasks' }));
+    expect(screen.getByRole('link', { name: 'Grow revenue' }).getAttribute('href')).toBe('/goals/g1');
+  });
+
+  it('does not show a linked-goals section for a project with no linked goals', () => {
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      projects: [{ id: 'active-1', name: 'Website revamp', status: 'active' }],
+    };
+    renderWithRouter();
+    fireEvent.click(screen.getByRole('button', { name: 'Show tasks' }));
+    expect(screen.queryByText('Linked goals')).toBeNull();
+  });
+
+  it('does not show any goal-editing controls (link/unlink) in the project view', () => {
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      projects: [{ id: 'active-1', name: 'Website revamp', status: 'active' }],
+      goals: [{ id: 'g1', name: 'Grow revenue', priority: 'Normal', status: 'active', projectIds: ['active-1'] }],
+    };
+    renderWithRouter();
+    fireEvent.click(screen.getByRole('button', { name: 'Show tasks' }));
+    expect(screen.queryByRole('button', { name: /Unlink/ })).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 });

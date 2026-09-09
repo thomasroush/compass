@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: '/board', label: 'Board' },
   { to: '/tasks', label: 'Tasks' },
   { to: '/projects', label: 'Projects' },
+  { to: '/goals', label: 'Goals' },
   { to: '/notes', label: 'Daily Notes' },
   { to: '/calendar', label: 'Calendar' },
   { to: '/settings', label: 'Settings' },

@@ -1,5 +1,14 @@
-import { getProjectTasks, getTasksByStatus, sortProjectsByPriority } from '../store/reducer';
-import type { Project, Task } from '../types';
+import {
+  formatTargetValue,
+  getGoalProgress,
+  getGoalTargets,
+  getProjectGoals,
+  getProjectTasks,
+  getTargetProgress,
+  getTasksByStatus,
+  sortProjectsByPriority,
+} from '../store/reducer';
+import type { Goal, Priority, Project, Target, Task } from '../types';
 
 export type CopyToAIScope =
   | { type: 'current-work' }
@@ -85,7 +94,101 @@ function pushProjectSection(lines: string[], project: Project, tasksForProject: 
   lines.push('');
 }
 
-function buildCurrentWorkBody(lines: string[], projects: Project[], tasks: Task[]): void {
+const PRIORITY_ORDER: Record<Priority, number> = { High: 0, Normal: 1, Low: 2 };
+
+/**
+ * One line per Target — reuses getTargetProgress (never re-derives progress
+ * here) and, for numeric Targets, formatTargetValue (both from
+ * src/store/reducer.ts) so display/calculation logic is never duplicated
+ * between the Goals UI and this formatter. Linked-tasks Targets show only
+ * the completed/total count, per the plan's "enough to explain the
+ * progress" requirement — never every linked task's title.
+ */
+function formatTargetLine(target: Target, tasks: Task[]): string {
+  const progress = Math.round(getTargetProgress(target, tasks));
+  if (target.type === 'numeric') {
+    const current = formatTargetValue(target.currentValue, target);
+    const goalValue = formatTargetValue(target.targetValue, target);
+    return `- Target: ${target.name} (numeric): ${current} / ${goalValue} (${progress}%)`;
+  }
+  if (target.type === 'yesno') {
+    return `- Target: ${target.name} (yes/no): ${target.achieved ? 'Yes' : 'Not yet'} (${progress}%)`;
+  }
+  const completed = target.taskIds.filter((id) => tasks.find((t) => t.id === id)?.status === 'Done').length;
+  return `- Target: ${target.name} (linked tasks): ${completed}/${target.taskIds.length} complete (${progress}%)`;
+}
+
+/**
+ * One Goal's section — active (non-archived) Targets only (getGoalTargets
+ * already excludes archived), via formatTargetLine above. `includeLinkedProjects`
+ * is false for the One Project scope, where the goal is already shown inside
+ * that project's own section — restating "Linked projects: <this project>"
+ * there would be redundant.
+ */
+function pushGoalSection(
+  lines: string[],
+  goal: Goal,
+  targets: Target[],
+  tasks: Task[],
+  projects: Project[],
+  includeLinkedProjects: boolean,
+): void {
+  const activeTargets = getGoalTargets(targets, goal.id);
+  const progress = getGoalProgress(goal, targets, tasks);
+  const progressLabel = progress === null ? 'No targets yet' : `${Math.round(progress)}%`;
+
+  lines.push(
+    `## Goal: ${goal.name}`,
+    '',
+    `Priority: ${goal.priority} | ${formatDueDate(goal.dueDate)} | Progress: ${progressLabel}`,
+    '',
+  );
+  if (activeTargets.length === 0) {
+    lines.push('No targets yet.');
+  } else {
+    for (const target of activeTargets) lines.push(formatTargetLine(target, tasks));
+  }
+  if (includeLinkedProjects) {
+    const linkedNames = projects.filter((p) => goal.projectIds.includes(p.id)).map((p) => p.name);
+    if (linkedNames.length > 0) {
+      lines.push('', `Linked projects: ${linkedNames.join(', ')}`);
+    }
+  }
+  lines.push('');
+}
+
+/**
+ * Pushes one section per Active Goal (Paused/Achieved/Abandoned never
+ * appear in a working snapshot), sorted by priority then name — mirroring
+ * sortProjectsByPriority's own tie-break convention. Returns whether any
+ * Goal content was pushed, so callers can fold it into their own
+ * has-any-content check.
+ */
+function pushActiveGoalSections(
+  lines: string[],
+  goals: Goal[],
+  targets: Target[],
+  tasks: Task[],
+  projects: Project[],
+  includeLinkedProjects: boolean,
+): boolean {
+  const activeGoals = [...goals]
+    .filter((g) => g.status === 'active')
+    .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority] || a.name.localeCompare(b.name));
+
+  for (const goal of activeGoals) {
+    pushGoalSection(lines, goal, targets, tasks, projects, includeLinkedProjects);
+  }
+  return activeGoals.length > 0;
+}
+
+function buildCurrentWorkBody(
+  lines: string[],
+  projects: Project[],
+  tasks: Task[],
+  goals: Goal[],
+  targets: Target[],
+): void {
   const activeProjects = sortProjectsByPriority(projects.filter((p) => p.status === 'active'));
   let hasContent = false;
 
@@ -109,8 +212,12 @@ function buildCurrentWorkBody(lines: string[], projects: Project[], tasks: Task[
     hasContent = true;
   }
 
+  if (pushActiveGoalSections(lines, goals, targets, tasks, projects, true)) {
+    hasContent = true;
+  }
+
   if (!hasContent) {
-    lines.push('No active tasks or projects match this scope.', '');
+    lines.push('No active tasks, projects, or goals match this scope.', '');
   }
 }
 
@@ -132,6 +239,8 @@ function buildProjectBody(
   lines: string[],
   projects: Project[],
   tasks: Task[],
+  goals: Goal[],
+  targets: Target[],
   projectId: string,
 ): void {
   // Mirrors the plan's "select one active project": a project that is
@@ -145,17 +254,26 @@ function buildProjectBody(
   }
   const projectTasks = getProjectTasks(tasks, project.id);
   pushProjectSection(lines, project, projectTasks);
+
+  // Already inside this project's own section, so the "Linked projects:"
+  // line inside pushGoalSection would be redundant — omitted here.
+  const linkedGoals = getProjectGoals(goals, project.id);
+  pushActiveGoalSections(lines, linkedGoals, targets, tasks, projects, false);
 }
 
 /**
  * Pure, deterministic snapshot formatter for the "Copy to AI" feature.
- * Given the same projects/tasks/scope/generatedAt, always produces the same
- * string. Never includes IDs, timestamps used only for sync, or any field
- * beyond what the current Compass data model already displays.
+ * Given the same projects/tasks/goals/targets/scope/generatedAt, always
+ * produces the same string. Never includes IDs, timestamps used only for
+ * sync, or any field beyond what the current Compass data model already
+ * displays. Today's scope is deliberately never given goals/targets —
+ * buildTodayBody's signature and behavior are unchanged.
  */
 export function buildAISnapshot(
   projects: Project[],
   tasks: Task[],
+  goals: Goal[],
+  targets: Target[],
   scope: CopyToAIScope,
   generatedAt: Date,
 ): string {
@@ -174,9 +292,9 @@ export function buildAISnapshot(
   if (scope.type === 'today') {
     buildTodayBody(lines, projects, tasks);
   } else if (scope.type === 'project') {
-    buildProjectBody(lines, projects, tasks, scope.projectId);
+    buildProjectBody(lines, projects, tasks, goals, targets, scope.projectId);
   } else {
-    buildCurrentWorkBody(lines, projects, tasks);
+    buildCurrentWorkBody(lines, projects, tasks, goals, targets);
   }
 
   return lines.join('\n').trim() + '\n';

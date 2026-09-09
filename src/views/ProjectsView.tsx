@@ -1,8 +1,16 @@
 import { FormEvent, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../store/useApp';
-import { getProjectTasks, getVisibleProjects, sortProjectsByPriority } from '../store/reducer';
+import {
+  getGoalProgress,
+  getProjectGoals,
+  getProjectTasks,
+  getVisibleProjects,
+  sortProjectsByPriority,
+} from '../store/reducer';
 import { TaskRow } from '../components/TaskRow';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ProgressBar } from '../components/ProgressBar';
 import type { Project, ProjectStatus } from '../types';
 
 export function ProjectsView() {
@@ -99,6 +107,7 @@ export function ProjectsView() {
         <ul className="project-list">
           {sorted.map((project) => {
             const tasks = getProjectTasks(state.tasks, project.id);
+            const linkedGoals = getProjectGoals(state.goals, project.id);
             const expanded = expandedId === project.id;
 
             return (
@@ -167,6 +176,30 @@ export function ProjectsView() {
                         ))}
                       </ul>
                     )}
+                  </div>
+                )}
+
+                {expanded && linkedGoals.length > 0 && (
+                  <div className="project-goals">
+                    <p className="section-help">Linked goals</p>
+                    <ul className="task-list">
+                      {linkedGoals.map((goal) => (
+                        <li key={goal.id} className="task-row compact">
+                          <div className="task-row-main">
+                            <h4 className="task-title">
+                              <Link to={`/goals/${goal.id}`}>{goal.name}</Link>
+                            </h4>
+                            <div className="task-meta">
+                              <span className={`badge goal-${goal.status}`}>{goal.status}</span>
+                            </div>
+                            <ProgressBar
+                              progress={getGoalProgress(goal, state.targets, state.tasks)}
+                              label={`${goal.name} progress`}
+                            />
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </li>
