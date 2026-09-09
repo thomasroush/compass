@@ -20,6 +20,8 @@ const auth = vi.hoisted(() => ({
 const projectsRepo = vi.hoisted(() => ({ listProjects: vi.fn() }));
 const tasksRepo = vi.hoisted(() => ({ listTasks: vi.fn() }));
 const dailyNotesRepo = vi.hoisted(() => ({ listDailyNotes: vi.fn() }));
+const goalsRepo = vi.hoisted(() => ({ listGoals: vi.fn() }));
+const targetsRepo = vi.hoisted(() => ({ listTargets: vi.fn() }));
 
 vi.mock('../lib/supabaseClient', () => ({
   supabase: { auth },
@@ -28,6 +30,8 @@ vi.mock('../lib/supabaseClient', () => ({
 vi.mock('../repository/projectsRepository', () => projectsRepo);
 vi.mock('../repository/tasksRepository', () => tasksRepo);
 vi.mock('../repository/dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('../repository/goalsRepository', () => goalsRepo);
+vi.mock('../repository/targetsRepository', () => targetsRepo);
 
 function ok<T>(data: T): RepositoryResult<T> {
   return { ok: true, data };
@@ -122,6 +126,8 @@ beforeEach(() => {
   projectsRepo.listProjects.mockResolvedValue(ok([]));
   tasksRepo.listTasks.mockResolvedValue(ok([]));
   dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+  goalsRepo.listGoals.mockResolvedValue(ok([]));
+  targetsRepo.listTargets.mockResolvedValue(ok([]));
 });
 
 afterEach(() => {

@@ -1,9 +1,12 @@
 -- Add optional project priority ranking
 -- Daily Compass
 --
--- PROPOSED MIGRATION — NOT EXECUTED.
--- This file is prepared for review only. Run it against the Supabase project manually
--- (e.g. via the SQL editor) when ready — it is not applied automatically by this repo.
+-- APPLIED 2026-09-07. This migration has been executed against the live
+-- Supabase project — see BUILD_STATUS.md's "Optional project priority
+-- ranking" entry. Kept here as the historical record of what was run; do
+-- not re-run it. (An earlier revision of this comment read "PROPOSED
+-- MIGRATION — NOT EXECUTED" — that was true only before this migration was
+-- applied and was never updated afterward.)
 --
 -- Adds a single nullable column to public.projects: priority_rank. Mirrors the app's
 -- new optional Project.priorityRank field (src/types.ts) — unset means "unranked."

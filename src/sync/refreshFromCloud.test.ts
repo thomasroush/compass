@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { refreshFromCloud } from './refreshFromCloud';
 import { createEmptyAccountMetadata, markDirty, setRecordUpdatedAt, type AccountSyncMetadata } from './metadata';
-import { createEmptyAppData, type AppData, type Project } from '../types';
-import type { CloudProject, RepositoryResult } from '../repository/types';
+import { createEmptyAppData, type AppData, type Goal, type Project } from '../types';
+import type { CloudGoal, CloudProject, RepositoryResult } from '../repository/types';
 
 const projectsRepo = vi.hoisted(() => ({ listProjects: vi.fn() }));
 const tasksRepo = vi.hoisted(() => ({ listTasks: vi.fn() }));
 const dailyNotesRepo = vi.hoisted(() => ({ listDailyNotes: vi.fn() }));
+const goalsRepo = vi.hoisted(() => ({ listGoals: vi.fn() }));
+const targetsRepo = vi.hoisted(() => ({ listTargets: vi.fn() }));
 
 vi.mock('../repository/projectsRepository', () => projectsRepo);
 vi.mock('../repository/tasksRepository', () => tasksRepo);
 vi.mock('../repository/dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('../repository/goalsRepository', () => goalsRepo);
+vi.mock('../repository/targetsRepository', () => targetsRepo);
 
 function ok<T>(data: T): RepositoryResult<T> {
   return { ok: true, data };
@@ -20,9 +24,13 @@ function err(): RepositoryResult<never> {
 }
 
 const project: Project = { id: 'proj-1', name: 'Home', status: 'active' };
+const goal: Goal = { id: 'goal-1', name: 'Ship it', priority: 'Normal', status: 'active', projectIds: [] };
 
 function cloudProject(overrides: Partial<CloudProject> = {}): CloudProject {
   return { ...project, updatedAt: '2026-08-30T01:00:00.000Z', ...overrides };
+}
+function cloudGoal(overrides: Partial<CloudGoal> = {}): CloudGoal {
+  return { ...goal, updatedAt: '2026-08-30T01:00:00.000Z', ...overrides };
 }
 
 function metadataWith(overrides: Partial<AccountSyncMetadata> = {}): AccountSyncMetadata {
@@ -37,6 +45,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   tasksRepo.listTasks.mockResolvedValue(ok([]));
   dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+  goalsRepo.listGoals.mockResolvedValue(ok([]));
+  targetsRepo.listTargets.mockResolvedValue(ok([]));
 });
 
 describe('refreshFromCloud — returning-device pull', () => {
@@ -154,5 +164,44 @@ describe('refreshFromCloud — returning-device pull', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.message).toBe('Network request failed.');
+  });
+
+  it('pulls down a Goal that changed in the cloud, same as any other entity', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([]));
+    goalsRepo.listGoals.mockResolvedValue(ok([cloudGoal({ name: 'Ship it (renamed)' })]));
+    const local = localWith({ goals: [goal] });
+    const metadata = setRecordUpdatedAt(metadataWith(), 'goal', 'goal-1', '2026-08-29T00:00:00.000Z');
+
+    const result = await refreshFromCloud(local, metadata);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changed).toBe(true);
+    expect(result.appData.goals).toEqual([{ ...goal, name: 'Ship it (renamed)' }]);
+    expect(result.metadata.records.goal['goal-1']?.lastKnownUpdatedAt).toBe('2026-08-30T01:00:00.000Z');
+  });
+
+  it('never overwrites a Goal this device has an unsynced local edit for', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([]));
+    goalsRepo.listGoals.mockResolvedValue(ok([cloudGoal({ name: 'Cloud says something else' })]));
+    const local = localWith({ goals: [{ ...goal, name: 'My unsaved local edit' }] });
+    let metadata = metadataWith();
+    metadata = setRecordUpdatedAt(metadata, 'goal', 'goal-1', '2026-08-29T00:00:00.000Z');
+    metadata = markDirty(metadata, 'goal', 'goal-1');
+
+    const result = await refreshFromCloud(local, metadata);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.appData.goals).toEqual([{ ...goal, name: 'My unsaved local edit' }]);
+  });
+
+  it('a goals/targets read failure is surfaced the same way as any other entity failure', async () => {
+    goalsRepo.listGoals.mockResolvedValue(err());
+    const local = localWith();
+
+    const result = await refreshFromCloud(local, metadataWith());
+
+    expect(result.ok).toBe(false);
   });
 });

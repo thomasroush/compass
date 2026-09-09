@@ -53,25 +53,81 @@ describe('classifyActionProvenance', () => {
   });
 });
 
-describe('resolveDirtyTargets — Goal/Target actions are deliberately inert (foundation stage)', () => {
-  const GOAL_TARGET_ACTIONS: AppAction[] = [
-    { type: 'ADD_GOAL', id: 'g1', name: 'Ship it' },
-    { type: 'UPDATE_GOAL', id: 'g1', name: 'X' },
-    { type: 'LINK_GOAL_PROJECT', goalId: 'g1', projectId: 'p1' },
-    { type: 'UNLINK_GOAL_PROJECT', goalId: 'g1', projectId: 'p1' },
-    { type: 'ADD_TARGET', id: 'tg1', goalId: 'g1', targetType: 'yesno', name: 'Milestone' },
-    { type: 'UPDATE_TARGET', id: 'tg1', updates: { name: 'X' } },
-    { type: 'ARCHIVE_TARGET', id: 'tg1' },
-    { type: 'RESTORE_TARGET', id: 'tg1' },
-    { type: 'REORDER_TARGET', id: 'tg1', direction: 'up' },
-  ];
+describe('resolveDirtyTargets — Goal/Target dirty marking', () => {
+  it('marks the newly created goal under the id the caller supplied', () => {
+    const targets = resolveDirtyTargets({ type: 'ADD_GOAL', id: 'new-goal', name: 'Ship it' }, createEmptyAppData());
+    expect(targets).toEqual([{ entity: 'goal', id: 'new-goal' }]);
+  });
 
-  it.each(GOAL_TARGET_ACTIONS)(
-    'returns no dirty targets for $type — Goal/Target sync activation is a later stage',
-    (action) => {
-      expect(resolveDirtyTargets(action, createEmptyAppData())).toEqual([]);
-    },
-  );
+  it('does not mark ADD_GOAL dirty when the id was never pre-generated (mirrors ADD_PROJECT)', () => {
+    expect(resolveDirtyTargets({ type: 'ADD_GOAL', name: 'Ship it' }, createEmptyAppData())).toEqual([]);
+  });
+
+  it('marks an existing goal dirty by its id for UPDATE_GOAL', () => {
+    const prev: AppData = { ...createEmptyAppData(), goals: [goalFixture('g1')] };
+    expect(resolveDirtyTargets({ type: 'UPDATE_GOAL', id: 'g1', name: 'Renamed' }, prev)).toEqual([
+      { entity: 'goal', id: 'g1' },
+    ]);
+  });
+
+  it('does not mark a nonexistent goal dirty', () => {
+    expect(resolveDirtyTargets({ type: 'UPDATE_GOAL', id: 'missing', name: 'X' }, createEmptyAppData())).toEqual([]);
+  });
+
+  it('LINK_GOAL_PROJECT marks the goal dirty only when the project is not already linked (mirrors the reducer no-op guard)', () => {
+    const prev: AppData = { ...createEmptyAppData(), goals: [goalFixture('g1', { projectIds: ['p1'] })] };
+    expect(resolveDirtyTargets({ type: 'LINK_GOAL_PROJECT', goalId: 'g1', projectId: 'p2' }, prev)).toEqual([
+      { entity: 'goal', id: 'g1' },
+    ]);
+    expect(resolveDirtyTargets({ type: 'LINK_GOAL_PROJECT', goalId: 'g1', projectId: 'p1' }, prev)).toEqual([]);
+  });
+
+  it('UNLINK_GOAL_PROJECT marks the goal dirty only when the project is actually linked', () => {
+    const prev: AppData = { ...createEmptyAppData(), goals: [goalFixture('g1', { projectIds: ['p1'] })] };
+    expect(resolveDirtyTargets({ type: 'UNLINK_GOAL_PROJECT', goalId: 'g1', projectId: 'p1' }, prev)).toEqual([
+      { entity: 'goal', id: 'g1' },
+    ]);
+    expect(resolveDirtyTargets({ type: 'UNLINK_GOAL_PROJECT', goalId: 'g1', projectId: 'p2' }, prev)).toEqual([]);
+  });
+
+  it('marks the newly created target under the id the caller supplied', () => {
+    const action: AppAction = { type: 'ADD_TARGET', id: 'new-target', goalId: 'g1', targetType: 'yesno', name: 'Milestone' };
+    expect(resolveDirtyTargets(action, createEmptyAppData())).toEqual([{ entity: 'target', id: 'new-target' }]);
+  });
+
+  it('marks an existing target dirty for UPDATE_TARGET/ARCHIVE_TARGET/RESTORE_TARGET', () => {
+    const prev: AppData = { ...createEmptyAppData(), targets: [targetFixture('tg1')] };
+    expect(resolveDirtyTargets({ type: 'UPDATE_TARGET', id: 'tg1', updates: {} }, prev)).toEqual([
+      { entity: 'target', id: 'tg1' },
+    ]);
+    expect(resolveDirtyTargets({ type: 'ARCHIVE_TARGET', id: 'tg1' }, prev)).toEqual([
+      { entity: 'target', id: 'tg1' },
+    ]);
+    expect(resolveDirtyTargets({ type: 'RESTORE_TARGET', id: 'tg1' }, prev)).toEqual([
+      { entity: 'target', id: 'tg1' },
+    ]);
+  });
+
+  it('REORDER_TARGET marks both the acted-on target and its swap partner dirty', () => {
+    const prev: AppData = {
+      ...createEmptyAppData(),
+      targets: [targetFixture('tg1', { sortOrder: 0 }), targetFixture('tg2', { sortOrder: 1 })],
+    };
+    expect(resolveDirtyTargets({ type: 'REORDER_TARGET', id: 'tg2', direction: 'up' }, prev)).toEqual([
+      { entity: 'target', id: 'tg2' },
+      { entity: 'target', id: 'tg1' },
+    ]);
+  });
+
+  it('REORDER_TARGET marks nothing at the top/bottom boundary', () => {
+    const prev: AppData = { ...createEmptyAppData(), targets: [targetFixture('tg1', { sortOrder: 0 })] };
+    expect(resolveDirtyTargets({ type: 'REORDER_TARGET', id: 'tg1', direction: 'up' }, prev)).toEqual([]);
+  });
+
+  it('REORDER_TARGET marks nothing for an archived target', () => {
+    const prev: AppData = { ...createEmptyAppData(), targets: [targetFixture('tg1', { archived: true })] };
+    expect(resolveDirtyTargets({ type: 'REORDER_TARGET', id: 'tg1', direction: 'up' }, prev)).toEqual([]);
+  });
 });
 
 describe('resolveDirtyTargets — dirty marking', () => {
@@ -312,6 +368,30 @@ function taskFixture(
     sortOrder: 0,
     isPrimary: false,
     archived: false,
+    ...overrides,
+  };
+}
+
+function goalFixture(id: string, overrides: Partial<{ projectIds: string[] }> = {}) {
+  return {
+    id,
+    name: 'Goal',
+    priority: 'Normal' as const,
+    status: 'active' as const,
+    projectIds: [],
+    ...overrides,
+  };
+}
+
+function targetFixture(id: string, overrides: Partial<{ sortOrder: number; archived: boolean }> = {}) {
+  return {
+    id,
+    goalId: 'g1',
+    name: 'Target',
+    sortOrder: 0,
+    archived: false,
+    type: 'yesno' as const,
+    achieved: false,
     ...overrides,
   };
 }

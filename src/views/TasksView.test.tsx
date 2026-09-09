@@ -7,7 +7,7 @@ import { createTaskForTest } from '../store/reducer';
 
 const mocks = vi.hoisted(() => ({
   appState: {
-    current: { version: 1, tasks: [], projects: [], dailyNotes: [] } as AppData,
+    current: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] } as AppData,
     dispatch: vi.fn(),
   },
 }));

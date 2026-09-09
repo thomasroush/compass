@@ -84,6 +84,12 @@ function updateMetadataAfterHydration(
   for (const note of hydrated.dailyNotes) {
     next = setRecordUpdatedAt(next, 'dailyNote', note.id, note.updatedAt);
   }
+  for (const goal of hydrated.goals) {
+    next = setRecordUpdatedAt(next, 'goal', goal.id, goal.updatedAt);
+  }
+  for (const target of hydrated.targets) {
+    next = setRecordUpdatedAt(next, 'target', target.id, target.updatedAt);
+  }
   return next;
 }
 

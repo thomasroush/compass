@@ -1,8 +1,10 @@
 import type { AppData, DailyNote } from '../types';
 import { listDailyNotes } from '../repository/dailyNotesRepository';
+import { listGoals } from '../repository/goalsRepository';
 import { listProjects } from '../repository/projectsRepository';
+import { listTargets } from '../repository/targetsRepository';
 import { listTasks } from '../repository/tasksRepository';
-import type { CloudDailyNote, CloudProject, CloudTask } from '../repository/types';
+import type { CloudDailyNote, CloudGoal, CloudProject, CloudTarget, CloudTask } from '../repository/types';
 import { decideHydration, type EntityCounts, type HydrationDecision } from './hydration';
 
 /**
@@ -25,6 +27,8 @@ export interface HydratedCloudData {
   projects: CloudProject[];
   tasks: CloudTask[];
   dailyNotes: CloudDailyNote[];
+  goals: CloudGoal[];
+  targets: CloudTarget[];
 }
 
 export interface HydrateFromCloudResult {
@@ -37,10 +41,17 @@ export interface HydrateFromCloudResult {
   hydrated?: HydratedCloudData;
 }
 
-function stripUpdatedAt<T extends { updatedAt: string }>(record: T): Omit<T, 'updatedAt'> {
+// Parameterized as `T & { updatedAt: string }` (matching src/sync/linkingChoice.ts's
+// stripUpdatedAt), not `T extends { updatedAt: string }` -> `Omit<T, 'updatedAt'>` —
+// the latter would infer T as the whole CloudTarget union and compute
+// `Omit<CloudTarget, 'updatedAt'>`, which (per how TS's `Omit`/`keyof` handle
+// unions) collapses to only the fields common to every Target variant,
+// silently dropping type-specific fields like `taskIds`. This form infers T
+// as `Target` directly, preserving the discriminated union.
+function stripUpdatedAt<T>(record: T & { updatedAt: string }): T {
   const { updatedAt, ...rest } = record;
   void updatedAt;
-  return rest;
+  return rest as T;
 }
 
 function isMeaningfulDailyNote(note: DailyNote): boolean {
@@ -70,12 +81,26 @@ function isMeaningfulDailyNote(note: DailyNote): boolean {
  * counted as-is — archived tasks included. An archived task still holds a
  * real title; it is only hidden from the default view by a filter, not
  * actually empty, so excluding it would risk a genuine, silent data loss.
+ *
+ * Goals and Targets are the same as Projects/Tasks in this respect —
+ * `ADD_GOAL`/`ADD_TARGET` both refuse a blank, trimmed-empty name — so they
+ * are counted as-is too, archived Targets included. This is also what closes
+ * the hydration data-loss window Goals/Targets previously exposed: before
+ * this, a device with real local Goals/Targets but zero tasks/projects/notes
+ * would have been misreported as "local is empty," and `hydrateFromCloud`
+ * would wholesale-replace local state (via `LOAD`) with cloud data that, at
+ * the time, could not carry Goals/Targets forward — silently deleting them.
+ * Counting them here means such a device is now correctly reported as
+ * populated, so `decideHydration` calls for an explicit choice (or
+ * await-explicit-migration) instead of an unattended overwrite.
  */
 function meaningfulLocalCounts(local: AppData): EntityCounts {
   return {
     projects: local.projects.length,
     tasks: local.tasks.length,
     dailyNotes: local.dailyNotes.filter(isMeaningfulDailyNote).length,
+    goals: local.goals.length,
+    targets: local.targets.length,
   };
 }
 
@@ -102,10 +127,12 @@ export async function hydrateFromCloud(
 
   const localCounts = meaningfulLocalCounts(local);
 
-  const [projectsResult, tasksResult, notesResult] = await Promise.all([
+  const [projectsResult, tasksResult, notesResult, goalsResult, targetsResult] = await Promise.all([
     listProjects(),
     listTasks(),
     listDailyNotes(),
+    listGoals(),
+    listTargets(),
   ]);
 
   // Checked in a fixed order (matching migration.ts's getCloudCounts) so the
@@ -128,11 +155,25 @@ export async function hydrateFromCloud(
       localCounts,
     };
   }
+  if (!goalsResult.ok) {
+    return {
+      decision: { kind: 'cloud-query-failed', errorType: goalsResult.error.type, message: goalsResult.error.message },
+      localCounts,
+    };
+  }
+  if (!targetsResult.ok) {
+    return {
+      decision: { kind: 'cloud-query-failed', errorType: targetsResult.error.type, message: targetsResult.error.message },
+      localCounts,
+    };
+  }
 
   const cloudCounts: EntityCounts = {
     projects: projectsResult.data.length,
     tasks: tasksResult.data.length,
     dailyNotes: notesResult.data.length,
+    goals: goalsResult.data.length,
+    targets: targetsResult.data.length,
   };
 
   const decision = decideHydration({
@@ -146,11 +187,17 @@ export async function hydrateFromCloud(
     return { decision, localCounts, cloudCounts };
   }
 
+  // Goals/targets are always included, even when empty (listX already
+  // returns [] for zero rows, never undefined) — a device hydrating from a
+  // cloud account with no Goals/Targets yet must not end up with the field
+  // missing/undefined now that AppData requires it.
   const appData: AppData = {
     version: 1,
     projects: projectsResult.data.map(stripUpdatedAt),
     tasks: tasksResult.data.map(stripUpdatedAt),
     dailyNotes: notesResult.data.map(stripUpdatedAt),
+    goals: goalsResult.data.map(stripUpdatedAt),
+    targets: targetsResult.data.map(stripUpdatedAt),
   };
 
   return {
@@ -162,6 +209,8 @@ export async function hydrateFromCloud(
       projects: projectsResult.data,
       tasks: tasksResult.data,
       dailyNotes: notesResult.data,
+      goals: goalsResult.data,
+      targets: targetsResult.data,
     },
   };
 }

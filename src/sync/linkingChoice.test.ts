@@ -7,8 +7,8 @@ import {
   type CloudBundle,
 } from './linkingChoice';
 import { createEmptyAccountMetadata, isDirty } from './metadata';
-import { createEmptyAppData, type AppData, type Project } from '../types';
-import type { CloudProject, RepositoryResult } from '../repository/types';
+import { createEmptyAppData, type AppData, type Goal, type Project } from '../types';
+import type { CloudGoal, CloudProject, RepositoryResult } from '../repository/types';
 
 const projectsRepo = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn(), updateProjectGuarded: vi.fn() }));
 const tasksRepo = vi.hoisted(() => ({ listTasks: vi.fn(), createTask: vi.fn(), updateTaskGuarded: vi.fn() }));
@@ -17,10 +17,18 @@ const dailyNotesRepo = vi.hoisted(() => ({
   createDailyNote: vi.fn(),
   updateDailyNoteGuarded: vi.fn(),
 }));
+const goalsRepo = vi.hoisted(() => ({ listGoals: vi.fn(), createGoal: vi.fn(), updateGoalGuarded: vi.fn() }));
+const targetsRepo = vi.hoisted(() => ({
+  listTargets: vi.fn(),
+  createTarget: vi.fn(),
+  updateTargetGuarded: vi.fn(),
+}));
 
 vi.mock('../repository/projectsRepository', () => projectsRepo);
 vi.mock('../repository/tasksRepository', () => tasksRepo);
 vi.mock('../repository/dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('../repository/goalsRepository', () => goalsRepo);
+vi.mock('../repository/targetsRepository', () => targetsRepo);
 
 function ok<T>(data: T): RepositoryResult<T> {
   return { ok: true, data };
@@ -49,11 +57,13 @@ function localWith(overrides: Partial<AppData> = {}): AppData {
 }
 
 function emptyCloud(): CloudBundle {
-  return { projects: [], tasks: [], dailyNotes: [] };
+  return { projects: [], tasks: [], dailyNotes: [], goals: [], targets: [] };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  goalsRepo.listGoals.mockResolvedValue(ok([]));
+  targetsRepo.listTargets.mockResolvedValue(ok([]));
 });
 
 describe('loadCloudBundle', () => {
@@ -83,7 +93,13 @@ describe('loadCloudBundle', () => {
 describe('compareForLinking', () => {
   it('classifies local-only, cloud-only, and differing records correctly, and identical is false when any differ', () => {
     const local = localWith({ projects: [localProject, sharedLocalProject] });
-    const cloud: CloudBundle = { projects: [cloudOnlyProject, sharedCloudProject], tasks: [], dailyNotes: [] };
+    const cloud: CloudBundle = {
+      projects: [cloudOnlyProject, sharedCloudProject],
+      tasks: [],
+      dailyNotes: [],
+      goals: [],
+      targets: [],
+    };
 
     const comparison = compareForLinking(local, cloud);
 
@@ -99,6 +115,8 @@ describe('compareForLinking', () => {
       projects: [{ ...sharedLocalProject, updatedAt: '2026-08-30T00:00:00.000Z' }],
       tasks: [],
       dailyNotes: [],
+      goals: [],
+      targets: [],
     };
 
     const comparison = compareForLinking(local, cloud);
@@ -112,7 +130,7 @@ describe('compareForLinking', () => {
 
 describe('buildUseCloudData ("Use my account\'s data")', () => {
   it('replaces local content wholesale with the cloud bundle, stripping updatedAt, and never calls any repository write', () => {
-    const cloud: CloudBundle = { projects: [cloudOnlyProject], tasks: [], dailyNotes: [] };
+    const cloud: CloudBundle = { projects: [cloudOnlyProject], tasks: [], dailyNotes: [], goals: [], targets: [] };
     const result = buildUseCloudData(cloud);
 
     expect(result.projects).toEqual([{ id: 'proj-cloud', name: 'Cloud only', status: 'active' }]);
@@ -127,7 +145,13 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
     projectsRepo.createProject.mockResolvedValue(ok({} as CloudProject));
 
     const local = localWith({ projects: [localProject, sharedLocalProject] });
-    const cloud: CloudBundle = { projects: [cloudOnlyProject, sharedCloudProject], tasks: [], dailyNotes: [] };
+    const cloud: CloudBundle = {
+      projects: [cloudOnlyProject, sharedCloudProject],
+      tasks: [],
+      dailyNotes: [],
+      goals: [],
+      targets: [],
+    };
     const comparison = compareForLinking(local, cloud);
     const metadata = createEmptyAccountMetadata('user-1');
 
@@ -150,6 +174,8 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
     expect(outcome.deferred.project).toEqual([]);
     expect(outcome.deferred.task).toEqual([]);
     expect(outcome.deferred.dailyNote).toEqual([]);
+    expect(outcome.deferred.goal).toEqual([]);
+    expect(outcome.deferred.target).toEqual([]);
   });
 
   it('defers to the drain engine on a write failure: marks the record dirty and reports it, never retries or resolves conflicts inline', async () => {
@@ -158,7 +184,7 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
     );
 
     const local = localWith({ projects: [sharedLocalProject] });
-    const cloud: CloudBundle = { projects: [sharedCloudProject], tasks: [], dailyNotes: [] };
+    const cloud: CloudBundle = { projects: [sharedCloudProject], tasks: [], dailyNotes: [], goals: [], targets: [] };
     const comparison = compareForLinking(local, cloud);
     const metadata = createEmptyAccountMetadata('user-1');
 
@@ -174,6 +200,8 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
       projects: [{ ...sharedLocalProject, updatedAt: '2026-08-30T00:00:00.000Z' }],
       tasks: [],
       dailyNotes: [],
+      goals: [],
+      targets: [],
     };
     const comparison = compareForLinking(local, cloud);
     expect(comparison.identical).toBe(true);
@@ -182,5 +210,62 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
 
     expect(projectsRepo.updateProjectGuarded).not.toHaveBeenCalled();
     expect(projectsRepo.createProject).not.toHaveBeenCalled();
+  });
+});
+
+describe('Goals and Targets participate in the explicit-choice flow the same way as every other entity', () => {
+  const localGoal: Goal = { id: 'goal-local', name: 'Local goal', priority: 'Normal', status: 'active', projectIds: [] };
+  const cloudOnlyGoal: CloudGoal = { ...localGoal, id: 'goal-cloud', name: 'Cloud goal', updatedAt: 'ts' };
+
+  it('loadCloudBundle reads goals and targets alongside the other three entities', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([]));
+    tasksRepo.listTasks.mockResolvedValue(ok([]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+    goalsRepo.listGoals.mockResolvedValue(ok([cloudOnlyGoal]));
+
+    const result = await loadCloudBundle();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.goals).toEqual([cloudOnlyGoal]);
+    expect(result.data.targets).toEqual([]);
+  });
+
+  it('compareForLinking classifies goal-only records correctly', () => {
+    const local = localWith({ goals: [localGoal] });
+    const cloud: CloudBundle = { ...emptyCloud(), goals: [cloudOnlyGoal] };
+
+    const comparison = compareForLinking(local, cloud);
+
+    expect(comparison.localOnly.goal).toEqual(['goal-local']);
+    expect(comparison.cloudOnly.goal).toEqual(['goal-cloud']);
+    expect(comparison.identical).toBe(false);
+  });
+
+  it('buildUseCloudData includes goals and targets, stripping updatedAt', () => {
+    const cloud: CloudBundle = { ...emptyCloud(), goals: [cloudOnlyGoal] };
+    const result = buildUseCloudData(cloud);
+    expect(result.goals).toEqual([{ ...localGoal, id: 'goal-cloud', name: 'Cloud goal' }]);
+  });
+
+  it('applyKeepLocalData creates a local-only goal in the cloud', async () => {
+    goalsRepo.createGoal.mockResolvedValue(ok({} as CloudGoal));
+    const local = localWith({ goals: [localGoal] });
+    const cloud = emptyCloud();
+    const comparison = compareForLinking(local, cloud);
+
+    const outcome = await applyKeepLocalData(local, cloud, comparison, createEmptyAccountMetadata('user-1'), 'user-1');
+
+    expect(goalsRepo.createGoal).toHaveBeenCalledWith(localGoal, 'user-1');
+    expect(outcome.appData.goals.map((g) => g.id)).toEqual(['goal-local']);
+  });
+
+  it('applyKeepLocalData pulls down a cloud-only goal without deleting anything locally', async () => {
+    const local = localWith();
+    const cloud: CloudBundle = { ...emptyCloud(), goals: [cloudOnlyGoal] };
+    const comparison = compareForLinking(local, cloud);
+
+    const outcome = await applyKeepLocalData(local, cloud, comparison, createEmptyAccountMetadata('user-1'), 'user-1');
+
+    expect(outcome.appData.goals).toEqual([{ ...localGoal, id: 'goal-cloud', name: 'Cloud goal' }]);
   });
 });

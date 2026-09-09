@@ -1,7 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { AppData, DailyNote, Project, Task } from '../types';
+import type { AppData, DailyNote, Goal, Project, Target, Task } from '../types';
 import { createEmptyAppData } from '../types';
-import type { CloudDailyNote, CloudProject, CloudTask, RepositoryResult } from '../repository/types';
+import type {
+  CloudDailyNote,
+  CloudGoal,
+  CloudProject,
+  CloudTarget,
+  CloudTask,
+  RepositoryResult,
+} from '../repository/types';
 import { resetMemoryStore } from '../storage/storage';
 import {
   createEmptyAccountMetadata,
@@ -27,10 +34,22 @@ const dailyNotesRepo = vi.hoisted(() => ({
   updateDailyNoteGuarded: vi.fn(),
   listDailyNotes: vi.fn(),
 }));
+const goalsRepo = vi.hoisted(() => ({
+  createGoal: vi.fn(),
+  updateGoalGuarded: vi.fn(),
+  listGoals: vi.fn(),
+}));
+const targetsRepo = vi.hoisted(() => ({
+  createTarget: vi.fn(),
+  updateTargetGuarded: vi.fn(),
+  listTargets: vi.fn(),
+}));
 
 vi.mock('../repository/projectsRepository', () => projectsRepo);
 vi.mock('../repository/tasksRepository', () => tasksRepo);
 vi.mock('../repository/dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('../repository/goalsRepository', () => goalsRepo);
+vi.mock('../repository/targetsRepository', () => targetsRepo);
 
 import { drainDirtyWork } from './drainSync';
 
@@ -70,6 +89,27 @@ function note(overrides: Partial<DailyNote> = {}): DailyNote {
 }
 function cloudNote(base: DailyNote = note(), overrides: Partial<CloudDailyNote> = {}): CloudDailyNote {
   return { ...base, updatedAt: '2026-09-01T01:00:00.000Z', ...overrides };
+}
+function goal(overrides: Partial<Goal> = {}): Goal {
+  return { id: 'g1', name: 'Ship it', priority: 'Normal', status: 'active', projectIds: [], ...overrides };
+}
+function cloudGoal(base: Goal = goal(), overrides: Partial<CloudGoal> = {}): CloudGoal {
+  return { ...base, updatedAt: '2026-09-01T01:00:00.000Z', ...overrides };
+}
+function target(overrides: Partial<Target> = {}): Target {
+  return {
+    id: 'tg1',
+    goalId: 'g1',
+    name: 'Milestone',
+    sortOrder: 0,
+    archived: false,
+    type: 'yesno',
+    achieved: false,
+    ...overrides,
+  } as Target;
+}
+function cloudTarget(base: Target = target(), overrides: Partial<CloudTarget> = {}): CloudTarget {
+  return { ...base, updatedAt: '2026-09-01T01:00:00.000Z', ...overrides } as CloudTarget;
 }
 
 function localData(overrides: Partial<AppData> = {}): AppData {
@@ -459,13 +499,23 @@ describe('drainDirtyWork — durability across a simulated reload', () => {
 });
 
 describe('drainDirtyWork — ordering', () => {
-  it('processes projects before tasks before daily notes', async () => {
+  it('processes projects before tasks before daily notes before goals before targets', async () => {
     const callOrder: string[] = [];
     const p = project();
     const t = task();
     const n = note();
+    const g = goal();
+    const tg = target();
     dirtyMetadata((m) =>
-      markDirty(markDirty(markDirty(m, 'dailyNote', n.id), 'task', t.id), 'project', p.id),
+      markDirty(
+        markDirty(
+          markDirty(markDirty(markDirty(m, 'target', tg.id), 'goal', g.id), 'dailyNote', n.id),
+          'task',
+          t.id,
+        ),
+        'project',
+        p.id,
+      ),
     );
     projectsRepo.createProject.mockImplementation(async (proj: Project) => {
       callOrder.push('project');
@@ -479,9 +529,115 @@ describe('drainDirtyWork — ordering', () => {
       callOrder.push('dailyNote');
       return ok(cloudNote(note_));
     });
+    goalsRepo.createGoal.mockImplementation(async (goal_: Goal) => {
+      callOrder.push('goal');
+      return ok(cloudGoal(goal_));
+    });
+    targetsRepo.createTarget.mockImplementation(async (target_: Target) => {
+      callOrder.push('target');
+      return ok(cloudTarget(target_));
+    });
 
-    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [p], tasks: [t], dailyNotes: [n] }));
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () =>
+      localData({ projects: [p], tasks: [t], dailyNotes: [n], goals: [g], targets: [tg] }),
+    );
 
-    expect(callOrder).toEqual(['project', 'task', 'dailyNote']);
+    expect(callOrder).toEqual(['project', 'task', 'dailyNote', 'goal', 'target']);
+  });
+});
+
+describe('drainDirtyWork — Goals and Targets', () => {
+  it('creates a new goal, passing the exact accountId, and clears dirty on success', async () => {
+    const g = goal();
+    dirtyMetadata((m) => markDirty(m, 'goal', g.id));
+    goalsRepo.createGoal.mockResolvedValue(ok(cloudGoal(g)));
+
+    const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ goals: [g] }));
+
+    expect(goalsRepo.createGoal).toHaveBeenCalledWith(g, ACCOUNT);
+    expect(goalsRepo.updateGoalGuarded).not.toHaveBeenCalled();
+    expect(result.outcomes).toEqual([{ kind: 'synced' }]);
+    const meta = getAccountMetadata(loadSyncMetadataStore(), ACCOUNT);
+    expect(meta.dirty.goal).toEqual([]);
+  });
+
+  it('uses updateGoalGuarded with the known expectedUpdatedAt and pushes the full record, including projectIds', async () => {
+    const g = goal({ projectIds: ['p1', 'p2'] });
+    dirtyMetadata((m) => markDirty(setRecordUpdatedAt(m, 'goal', g.id, 'server-ts-1'), 'goal', g.id));
+    goalsRepo.updateGoalGuarded.mockResolvedValue(ok(cloudGoal(g, { updatedAt: 'server-ts-2' })));
+
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ goals: [g] }));
+
+    expect(goalsRepo.createGoal).not.toHaveBeenCalled();
+    expect(goalsRepo.updateGoalGuarded).toHaveBeenCalledWith(
+      g.id,
+      expect.objectContaining({ projectIds: ['p1', 'p2'] }),
+      'server-ts-1',
+      ACCOUNT,
+    );
+  });
+
+  it('creates a new numeric target, passing the exact accountId', async () => {
+    const t: Target = {
+      id: 'tg-numeric',
+      goalId: 'g1',
+      name: 'Revenue',
+      sortOrder: 0,
+      archived: false,
+      type: 'numeric',
+      startValue: 0,
+      currentValue: 10,
+      targetValue: 100,
+      valueFormat: 'number',
+    };
+    dirtyMetadata((m) => markDirty(m, 'target', t.id));
+    targetsRepo.createTarget.mockResolvedValue(ok(cloudTarget(t)));
+
+    const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ targets: [t] }));
+
+    expect(targetsRepo.createTarget).toHaveBeenCalledWith(t, ACCOUNT);
+    expect(result.outcomes).toEqual([{ kind: 'synced' }]);
+  });
+
+  it('uses updateTargetGuarded for an archive (an ordinary field update, never a delete)', async () => {
+    const t = target({ archived: true });
+    dirtyMetadata((m) => markDirty(setRecordUpdatedAt(m, 'target', t.id, 'server-ts-1'), 'target', t.id));
+    targetsRepo.updateTargetGuarded.mockResolvedValue(ok(cloudTarget(t, { updatedAt: 'server-ts-2' })));
+
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ targets: [t] }));
+
+    expect(targetsRepo.updateTargetGuarded).toHaveBeenCalledWith(
+      t.id,
+      expect.objectContaining({ archived: true }),
+      'server-ts-1',
+      ACCOUNT,
+    );
+    // Never a delete path for Targets.
+    expect(Object.keys(targetsRepo)).not.toContain('deleteTarget');
+  });
+
+  it('clears a dirty goal/target id with no corresponding local record instead of erroring', async () => {
+    dirtyMetadata((m) => markDirty(markDirty(m, 'goal', 'ghost-goal'), 'target', 'ghost-target'));
+
+    const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData());
+
+    expect(result.outcomes).toEqual([{ kind: 'skipped-missing' }, { kind: 'skipped-missing' }]);
+    expect(goalsRepo.createGoal).not.toHaveBeenCalled();
+    expect(targetsRepo.createTarget).not.toHaveBeenCalled();
+  });
+
+  it('a conflict on a goal does not stop the pass from reaching its target', async () => {
+    const g = goal();
+    const t = target();
+    dirtyMetadata((m) =>
+      markDirty(markDirty(setRecordUpdatedAt(m, 'goal', g.id, 'stale-ts'), 'goal', g.id), 'target', t.id),
+    );
+    goalsRepo.updateGoalGuarded.mockResolvedValue(err('conflict', 'This goal changed on the server.'));
+    targetsRepo.createTarget.mockResolvedValue(ok(cloudTarget(t)));
+
+    const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ goals: [g], targets: [t] }));
+
+    expect(result.stoppedEarly).toBe(false);
+    expect(result.outcomes.map((o) => o.kind)).toEqual(['conflict', 'synced']);
   });
 });

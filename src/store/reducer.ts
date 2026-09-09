@@ -545,11 +545,11 @@ export function appReducer(state: AppData, action: AppAction): AppData {
         status: 'active',
         projectIds: [],
       };
-      return { ...state, goals: [...(state.goals ?? []), goal] };
+      return { ...state, goals: [...state.goals, goal] };
     }
 
     case 'UPDATE_GOAL': {
-      const goals = state.goals ?? [];
+      const goals = state.goals;
       return {
         ...state,
         goals: goals.map((g) =>
@@ -572,7 +572,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     }
 
     case 'LINK_GOAL_PROJECT': {
-      const goals = state.goals ?? [];
+      const goals = state.goals;
       return {
         ...state,
         goals: goals.map((g) =>
@@ -584,7 +584,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     }
 
     case 'UNLINK_GOAL_PROJECT': {
-      const goals = state.goals ?? [];
+      const goals = state.goals;
       return {
         ...state,
         goals: goals.map((g) =>
@@ -598,7 +598,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     case 'ADD_TARGET': {
       const name = action.name.trim();
       if (!name) return state;
-      const targets = state.targets ?? [];
+      const targets = state.targets;
       const base = {
         id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
         goalId: action.goalId,
@@ -626,7 +626,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     }
 
     case 'UPDATE_TARGET': {
-      const targets = state.targets ?? [];
+      const targets = state.targets;
       return {
         ...state,
         targets: targets.map((t) => (t.id === action.id ? applyTargetUpdate(t, action.updates) : t)),
@@ -634,7 +634,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     }
 
     case 'ARCHIVE_TARGET': {
-      const targets = state.targets ?? [];
+      const targets = state.targets;
       return {
         ...state,
         targets: targets.map((t) => (t.id === action.id ? { ...t, archived: true } : t)),
@@ -642,7 +642,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     }
 
     case 'RESTORE_TARGET': {
-      const targets = state.targets ?? [];
+      const targets = state.targets;
       return {
         ...state,
         targets: targets.map((t) => (t.id === action.id ? { ...t, archived: false } : t)),
@@ -650,7 +650,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     }
 
     case 'REORDER_TARGET': {
-      const targets = state.targets ?? [];
+      const targets = state.targets;
       const target = targets.find((t) => t.id === action.id);
       if (!target || target.archived) return state;
       const siblings = getGoalTargets(targets, target.goalId);

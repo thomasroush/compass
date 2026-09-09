@@ -1,6 +1,7 @@
 import {
   countPrimaryTodayTasks,
   enforcePrimaryCap,
+  getGoalTargets,
   getTasksByStatus,
   type AppAction,
 } from '../store/reducer';
@@ -260,24 +261,59 @@ export function resolveDirtyTargets(action: AppAction, prevState: AppData): Dirt
       return [{ entity: 'dailyNote', id: action.id }];
     }
 
-    // Goals/Targets foundation stage: these are real 'user-edit' actions
-    // (classified above) but deliberately never produce a dirty target here.
-    // 'goal'/'target' are not yet SyncEntity values (see src/sync/metadata.ts
-    // — untouched this stage), so there is nothing valid to return them as,
-    // and no drain loop yet reads a 'goal'/'target' dirty list regardless.
-    // This intentionally leaves Goal/Target edits unsynced until a later,
-    // explicit sync-activation stage extends SYNC_ENTITIES and this
-    // function together.
-    case 'ADD_GOAL':
-    case 'UPDATE_GOAL':
-    case 'LINK_GOAL_PROJECT':
-    case 'UNLINK_GOAL_PROJECT':
-    case 'ADD_TARGET':
+    case 'ADD_GOAL': {
+      if (!action.name.trim() || !action.id) return [];
+      return [{ entity: 'goal', id: action.id }];
+    }
+
+    case 'UPDATE_GOAL': {
+      const exists = prevState.goals.some((g) => g.id === action.id);
+      return exists ? [{ entity: 'goal', id: action.id }] : [];
+    }
+
+    // Mirrors the reducer's own no-op guard: LINK_GOAL_PROJECT/
+    // UNLINK_GOAL_PROJECT only actually change the goal when the project
+    // isn't already (or isn't yet) in its projectIds — see reducer.ts's
+    // LINK_GOAL_PROJECT/UNLINK_GOAL_PROJECT cases.
+    case 'LINK_GOAL_PROJECT': {
+      const goal = prevState.goals.find((g) => g.id === action.goalId);
+      if (!goal || goal.projectIds.includes(action.projectId)) return [];
+      return [{ entity: 'goal', id: action.goalId }];
+    }
+
+    case 'UNLINK_GOAL_PROJECT': {
+      const goal = prevState.goals.find((g) => g.id === action.goalId);
+      if (!goal || !goal.projectIds.includes(action.projectId)) return [];
+      return [{ entity: 'goal', id: action.goalId }];
+    }
+
+    case 'ADD_TARGET': {
+      if (!action.name.trim() || !action.id) return [];
+      return [{ entity: 'target', id: action.id }];
+    }
+
     case 'UPDATE_TARGET':
     case 'ARCHIVE_TARGET':
-    case 'RESTORE_TARGET':
-    case 'REORDER_TARGET':
-      return [];
+    case 'RESTORE_TARGET': {
+      const exists = prevState.targets.some((t) => t.id === action.id);
+      return exists ? [{ entity: 'target', id: action.id }] : [];
+    }
+
+    case 'REORDER_TARGET': {
+      const target = prevState.targets.find((t) => t.id === action.id);
+      if (!target || target.archived) return [];
+
+      const siblings = getGoalTargets(prevState.targets, target.goalId);
+      const idx = siblings.findIndex((t) => t.id === action.id);
+      const swapIdx = action.direction === 'up' ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= siblings.length) return [];
+
+      const other = siblings[swapIdx];
+      return [
+        { entity: 'target', id: action.id },
+        { entity: 'target', id: other.id },
+      ];
+    }
 
     case 'LOAD':
     case 'IMPORT':

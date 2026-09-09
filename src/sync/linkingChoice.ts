@@ -1,8 +1,10 @@
 import { createDailyNote, listDailyNotes, updateDailyNoteGuarded } from '../repository/dailyNotesRepository';
+import { createGoal, listGoals, updateGoalGuarded } from '../repository/goalsRepository';
 import { createProject, listProjects, updateProjectGuarded } from '../repository/projectsRepository';
+import { createTarget, listTargets, updateTargetGuarded } from '../repository/targetsRepository';
 import { createTask, listTasks, updateTaskGuarded } from '../repository/tasksRepository';
-import type { CloudDailyNote, CloudProject, CloudTask } from '../repository/types';
-import type { AppData, DailyNote, Project, Task } from '../types';
+import type { CloudDailyNote, CloudGoal, CloudProject, CloudTarget, CloudTask } from '../repository/types';
+import type { AppData, DailyNote, Goal, Project, Target, Task } from '../types';
 import { markDirty, type AccountSyncMetadata, type SyncEntity } from './metadata';
 
 /**
@@ -17,6 +19,8 @@ export interface CloudBundle {
   projects: CloudProject[];
   tasks: CloudTask[];
   dailyNotes: CloudDailyNote[];
+  goals: CloudGoal[];
+  targets: CloudTarget[];
 }
 
 export interface LinkingComparison {
@@ -57,11 +61,28 @@ export type CloudBundleResult = { ok: true; data: CloudBundle } | { ok: false; m
 
 /** The only place this module reads from Supabase — components call this instead of the repository directly (per AGENTS.md). */
 export async function loadCloudBundle(): Promise<CloudBundleResult> {
-  const [projects, tasks, dailyNotes] = await Promise.all([listProjects(), listTasks(), listDailyNotes()]);
+  const [projects, tasks, dailyNotes, goals, targets] = await Promise.all([
+    listProjects(),
+    listTasks(),
+    listDailyNotes(),
+    listGoals(),
+    listTargets(),
+  ]);
   if (!projects.ok) return { ok: false, message: projects.error.message };
   if (!tasks.ok) return { ok: false, message: tasks.error.message };
   if (!dailyNotes.ok) return { ok: false, message: dailyNotes.error.message };
-  return { ok: true, data: { projects: projects.data, tasks: tasks.data, dailyNotes: dailyNotes.data } };
+  if (!goals.ok) return { ok: false, message: goals.error.message };
+  if (!targets.ok) return { ok: false, message: targets.error.message };
+  return {
+    ok: true,
+    data: {
+      projects: projects.data,
+      tasks: tasks.data,
+      dailyNotes: dailyNotes.data,
+      goals: goals.data,
+      targets: targets.data,
+    },
+  };
 }
 
 /** Pure — no I/O. Given local state and a freshly-read cloud bundle, classifies every record by id. */
@@ -69,6 +90,8 @@ export function compareForLinking(local: AppData, cloud: CloudBundle): LinkingCo
   const projects = compareEntity(local.projects, cloud.projects);
   const tasks = compareEntity(local.tasks, cloud.tasks);
   const dailyNotes = compareEntity(local.dailyNotes, cloud.dailyNotes);
+  const goals = compareEntity(local.goals, cloud.goals);
+  const targets = compareEntity(local.targets, cloud.targets);
 
   const identical =
     projects.localOnly.length === 0 &&
@@ -79,12 +102,36 @@ export function compareForLinking(local: AppData, cloud: CloudBundle): LinkingCo
     tasks.differing.length === 0 &&
     dailyNotes.localOnly.length === 0 &&
     dailyNotes.cloudOnly.length === 0 &&
-    dailyNotes.differing.length === 0;
+    dailyNotes.differing.length === 0 &&
+    goals.localOnly.length === 0 &&
+    goals.cloudOnly.length === 0 &&
+    goals.differing.length === 0 &&
+    targets.localOnly.length === 0 &&
+    targets.cloudOnly.length === 0 &&
+    targets.differing.length === 0;
 
   return {
-    localOnly: { project: projects.localOnly, task: tasks.localOnly, dailyNote: dailyNotes.localOnly },
-    cloudOnly: { project: projects.cloudOnly, task: tasks.cloudOnly, dailyNote: dailyNotes.cloudOnly },
-    differing: { project: projects.differing, task: tasks.differing, dailyNote: dailyNotes.differing },
+    localOnly: {
+      project: projects.localOnly,
+      task: tasks.localOnly,
+      dailyNote: dailyNotes.localOnly,
+      goal: goals.localOnly,
+      target: targets.localOnly,
+    },
+    cloudOnly: {
+      project: projects.cloudOnly,
+      task: tasks.cloudOnly,
+      dailyNote: dailyNotes.cloudOnly,
+      goal: goals.cloudOnly,
+      target: targets.cloudOnly,
+    },
+    differing: {
+      project: projects.differing,
+      task: tasks.differing,
+      dailyNote: dailyNotes.differing,
+      goal: goals.differing,
+      target: targets.differing,
+    },
     identical,
   };
 }
@@ -102,6 +149,8 @@ export function buildUseCloudData(cloud: CloudBundle): AppData {
     projects: cloud.projects.map(stripUpdatedAt),
     tasks: cloud.tasks.map(stripUpdatedAt),
     dailyNotes: cloud.dailyNotes.map(stripUpdatedAt),
+    goals: cloud.goals.map(stripUpdatedAt),
+    targets: cloud.targets.map(stripUpdatedAt),
   };
 }
 
@@ -132,7 +181,7 @@ export async function applyKeepLocalData(
   accountId: string,
 ): Promise<KeepLocalOutcome> {
   let nextMetadata = metadata;
-  const deferred: Record<SyncEntity, string[]> = { project: [], task: [], dailyNote: [] };
+  const deferred: Record<SyncEntity, string[]> = { project: [], task: [], dailyNote: [], goal: [], target: [] };
 
   async function resolveDiffering<T extends { id: string }>(
     entity: SyncEntity,
@@ -188,6 +237,24 @@ export async function applyKeepLocalData(
   await resolveDiffering<DailyNote>('dailyNote', comparison.differing.dailyNote, local.dailyNotes, cloud.dailyNotes, (id, r, ts) =>
     updateDailyNoteGuarded(id, { morning: r.morning, evening: r.evening }, ts, accountId),
   );
+  // Goal before Target: a target's guarded update can reference a goal_id
+  // that must already exist in the cloud (real foreign key, unlike tasks'
+  // nullable project_id) — see drainSync.ts's syncTarget doc comment.
+  await resolveDiffering<Goal>('goal', comparison.differing.goal, local.goals, cloud.goals, (id, r, ts) =>
+    updateGoalGuarded(
+      id,
+      { name: r.name, description: r.description, dueDate: r.dueDate, priority: r.priority, status: r.status, projectIds: r.projectIds },
+      ts,
+      accountId,
+    ),
+  );
+  await resolveDiffering<Target>('target', comparison.differing.target, local.targets, cloud.targets, (id, r, ts) => {
+    const { id: _id, goalId: _goalId, type: _type, ...updates } = r as Target;
+    void _id;
+    void _goalId;
+    void _type;
+    return updateTargetGuarded(id, updates, ts, accountId);
+  });
 
   await resolveLocalOnly<Project>('project', comparison.localOnly.project, local.projects, (r) =>
     createProject(r, accountId),
@@ -195,6 +262,11 @@ export async function applyKeepLocalData(
   await resolveLocalOnly<Task>('task', comparison.localOnly.task, local.tasks, (r) => createTask(r, accountId));
   await resolveLocalOnly<DailyNote>('dailyNote', comparison.localOnly.dailyNote, local.dailyNotes, (r) =>
     createDailyNote(r, accountId),
+  );
+  // Goal before Target, same foreign-key reason as above.
+  await resolveLocalOnly<Goal>('goal', comparison.localOnly.goal, local.goals, (r) => createGoal(r, accountId));
+  await resolveLocalOnly<Target>('target', comparison.localOnly.target, local.targets, (r) =>
+    createTarget(r, accountId),
   );
 
   // Cloud-only records: pull down, never delete. Local records that were
@@ -205,12 +277,16 @@ export async function applyKeepLocalData(
   const pulledNotes = cloud.dailyNotes
     .filter((n) => comparison.cloudOnly.dailyNote.includes(n.id))
     .map(stripUpdatedAt);
+  const pulledGoals = cloud.goals.filter((g) => comparison.cloudOnly.goal.includes(g.id)).map(stripUpdatedAt);
+  const pulledTargets = cloud.targets.filter((t) => comparison.cloudOnly.target.includes(t.id)).map(stripUpdatedAt);
 
   const appData: AppData = {
     ...local,
     projects: [...local.projects, ...pulledProjects],
     tasks: [...local.tasks, ...pulledTasks],
     dailyNotes: [...local.dailyNotes, ...pulledNotes],
+    goals: [...local.goals, ...pulledGoals],
+    targets: [...local.targets, ...pulledTargets],
   };
 
   return { appData, metadata: nextMetadata, deferred };

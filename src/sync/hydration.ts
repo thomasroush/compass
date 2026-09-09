@@ -14,10 +14,18 @@ export interface EntityCounts {
   projects: number;
   tasks: number;
   dailyNotes: number;
+  goals: number;
+  targets: number;
 }
 
 function isEmptyCounts(counts: EntityCounts): boolean {
-  return counts.projects === 0 && counts.tasks === 0 && counts.dailyNotes === 0;
+  return (
+    counts.projects === 0 &&
+    counts.tasks === 0 &&
+    counts.dailyNotes === 0 &&
+    counts.goals === 0 &&
+    counts.targets === 0
+  );
 }
 
 export type CloudCountsResult =

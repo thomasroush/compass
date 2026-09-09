@@ -1,8 +1,10 @@
 import { createDailyNote, listDailyNotes, updateDailyNoteGuarded } from '../repository/dailyNotesRepository';
+import { createGoal, listGoals, updateGoalGuarded } from '../repository/goalsRepository';
 import { createProject, listProjects, updateProjectGuarded } from '../repository/projectsRepository';
+import { createTarget, listTargets, updateTargetGuarded } from '../repository/targetsRepository';
 import { createTask, listTasks, updateTaskGuarded } from '../repository/tasksRepository';
 import type { RepositoryError, RepositoryResult } from '../repository/types';
-import type { AppData, DailyNote, Project, Task } from '../types';
+import type { AppData, DailyNote, Goal, Project, Target, Task } from '../types';
 import {
   clearDirty,
   getAccountMetadata,
@@ -236,7 +238,77 @@ async function syncDailyNote(
   return finishOutcome('dailyNote', id, accountId, before, getLocalState().dailyNotes.find((n) => n.id === id), result);
 }
 
-function finishOutcome<T extends Project | Task | DailyNote>(
+async function syncGoal(id: string, accountId: string, getLocalState: () => AppData): Promise<DrainRecordOutcome> {
+  const before = getLocalState().goals.find((g) => g.id === id);
+  if (!before) {
+    patchMetadata(accountId, (m) => clearDirty(m, 'goal', id));
+    return { kind: 'skipped-missing' };
+  }
+
+  const knownUpdatedAt = getRecordUpdatedAt(getAccountMetadata(loadSyncMetadataStore(), accountId), 'goal', id);
+
+  let result: RepositoryResult<{ updatedAt: string }>;
+  if (knownUpdatedAt) {
+    result = await updateGoalGuarded(
+      id,
+      {
+        name: before.name,
+        description: before.description,
+        dueDate: before.dueDate,
+        priority: before.priority,
+        status: before.status,
+        projectIds: before.projectIds,
+      },
+      knownUpdatedAt,
+      accountId,
+    );
+  } else {
+    result = await createGoal(before, accountId);
+    if (!result.ok && result.error.type === 'duplicate') {
+      return resolveDuplicateCreate('goal', id, accountId, before, listGoals);
+    }
+  }
+
+  return finishOutcome('goal', id, accountId, before, getLocalState().goals.find((g) => g.id === id), result);
+}
+
+/**
+ * Targets are drained after Goals (see drainDirtyWork's entity order) —
+ * targets.goal_id is a real foreign key to goals(user_id, id) (unlike
+ * tasks.project_id, which is nullable), so a target's first create can only
+ * succeed once its parent goal already exists in the cloud.
+ *
+ * Archive/Restore is an ordinary field update here (`archived: true|false`
+ * as part of the same full-record push), never a delete — Targets have no
+ * delete path in this app.
+ */
+async function syncTarget(id: string, accountId: string, getLocalState: () => AppData): Promise<DrainRecordOutcome> {
+  const before = getLocalState().targets.find((t) => t.id === id);
+  if (!before) {
+    patchMetadata(accountId, (m) => clearDirty(m, 'target', id));
+    return { kind: 'skipped-missing' };
+  }
+
+  const knownUpdatedAt = getRecordUpdatedAt(getAccountMetadata(loadSyncMetadataStore(), accountId), 'target', id);
+
+  let result: RepositoryResult<{ updatedAt: string }>;
+  if (knownUpdatedAt) {
+    const { id: _id, goalId: _goalId, type: _type, ...updates } = before;
+    void _id;
+    void _goalId;
+    void _type;
+    result = await updateTargetGuarded(id, updates, knownUpdatedAt, accountId);
+  } else {
+    result = await createTarget(before, accountId);
+    if (!result.ok && result.error.type === 'duplicate') {
+      return resolveDuplicateCreate('target', id, accountId, before, listTargets);
+    }
+  }
+
+  return finishOutcome('target', id, accountId, before, getLocalState().targets.find((t) => t.id === id), result);
+}
+
+function finishOutcome<T extends Project | Task | DailyNote | Goal | Target>(
   entity: SyncEntity,
   id: string,
   accountId: string,
@@ -269,9 +341,11 @@ function finishOutcome<T extends Project | Task | DailyNote>(
 
 /**
  * One drain pass: attempts every currently-dirty id for `accountId`, in
- * project -> task -> dailyNote order (matching migration's own
- * project-before-task rationale, though this loop never actually depends on
- * cross-entity ordering the way migration's foreign-key concern does).
+ * project -> task -> dailyNote -> goal -> target order. Project/task/
+ * dailyNote ordering matches migration's own project-before-task rationale,
+ * though this loop never actually depends on that ordering the way
+ * migration's foreign-key concern does. Goal-before-target is a real
+ * dependency, not just convention: see syncTarget's doc comment.
  *
  * Stops early — without throwing — the instant `isGenerationCurrent()`
  * returns false (checked between every network operation, never during
@@ -299,7 +373,11 @@ export async function drainDirtyWork(
   let accountError: DrainPassResult['accountError'] = null;
   let attempted = 0;
 
-  entityLoop: for (const entity of ['project', 'task', 'dailyNote'] as const) {
+  // Goal before Target: targets.goal_id is a real foreign key to
+  // goals(user_id, id) (see drainSync's syncTarget doc comment), so a
+  // target's first create can only succeed once its goal already exists in
+  // the cloud — mirrors migration.ts's "projects before tasks" rationale.
+  entityLoop: for (const entity of ['project', 'task', 'dailyNote', 'goal', 'target'] as const) {
     const snapshot = getAccountMetadata(loadSyncMetadataStore(), accountId).dirty[entity].slice();
 
     for (const id of snapshot) {
@@ -316,7 +394,11 @@ export async function drainDirtyWork(
             ? await syncProject(id, accountId, getLocalState)
             : entity === 'task'
               ? await syncTask(id, accountId, getLocalState)
-              : await syncDailyNote(id, accountId, getLocalState);
+              : entity === 'dailyNote'
+                ? await syncDailyNote(id, accountId, getLocalState)
+                : entity === 'goal'
+                  ? await syncGoal(id, accountId, getLocalState)
+                  : await syncTarget(id, accountId, getLocalState);
       } catch (thrown) {
         outcome = { kind: 'network-error', message: thrown instanceof Error ? thrown.message : String(thrown) };
       }

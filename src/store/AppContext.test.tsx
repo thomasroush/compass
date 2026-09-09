@@ -72,7 +72,7 @@ function TestConsumer() {
         onClick={() =>
           dispatch({
             type: 'LOAD',
-            data: { version: 1, tasks: [], projects: [], dailyNotes: [] },
+            data: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] },
           })
         }
       >
@@ -86,7 +86,7 @@ function TestConsumer() {
         onClick={() =>
           dispatch({
             type: 'IMPORT',
-            data: { version: 1, tasks: [], projects: [], dailyNotes: [] },
+            data: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] },
           })
         }
       >

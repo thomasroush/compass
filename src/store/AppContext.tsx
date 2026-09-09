@@ -45,7 +45,11 @@ export const AppContext = createContext<AppContextValue | null>(null);
  */
 function withPreGeneratedId(action: AppAction): AppAction {
   if (
-    (action.type === 'ADD_TASK' || action.type === 'ADD_PROJECT' || action.type === 'UPSERT_DAILY_NOTE') &&
+    (action.type === 'ADD_TASK' ||
+      action.type === 'ADD_PROJECT' ||
+      action.type === 'UPSERT_DAILY_NOTE' ||
+      action.type === 'ADD_GOAL' ||
+      action.type === 'ADD_TARGET') &&
     !action.id
   ) {
     return { ...action, id: generateId() };

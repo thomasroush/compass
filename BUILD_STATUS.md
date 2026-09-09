@@ -920,12 +920,12 @@ migration's scope or status.
     `src/sync/drainSync.ts`'s full-record push and `src/sync/linkingChoice.ts`'s "Keep this device's
     data" resolution — both updated to include it. No other sync file needed a change: hydration,
     refresh-from-cloud, and migration all pass whole `Project` objects through generically.
-  - **New Supabase migration, not yet run:** `supabase/migrations/20260906120000_add_project_priority_rank.sql`
+  - **Supabase migration — applied 2026-09-07:** `supabase/migrations/20260906120000_add_project_priority_rank.sql`
     adds `priority_rank integer` (nullable, `check (priority_rank is null or priority_rank > 0)`) to
-    `public.projects`. Prepared for review only, per this session's explicit instruction — not applied
-    to the live project. Until it is run, the app works fully locally (and for any signed-in
-    unconfigured/local-only use); a signed-in device's sync engine will retry setting `priority_rank`
-    against the live table until this migration is applied there.
+    `public.projects`. Prepared for review, then run against the live Supabase project on 2026-09-07 —
+    confirmed by the user. `priority_rank` reads/writes now work end-to-end for signed-in devices;
+    this is no longer a pending/local-only limitation. (An earlier revision of this entry read "not yet
+    run" — that was true only before the migration was applied and was never updated afterward.)
   - Tests: `src/store/reducer.projectPriority.test.ts` (new — `ADD_PROJECT`/`UPDATE_PROJECT`
     set/clear/leave-unchanged behavior, `sortProjectsByPriority`'s ordering and tie-breaking),
     `src/storage/storage.test.ts` (+3, validation accept/reject cases), `src/repository/mappers.test.ts`
@@ -1039,12 +1039,68 @@ migration's scope or status.
     function; no analytics or logging of snapshot contents; no import/paste-back path; no change to
     synchronization, task workflow, or any existing view.
 
+### Goals and Targets — data foundation and cloud-sync activation (2026-09-08)
+
+Two new entities, `Goal` and `Target` (`src/types.ts`), added under `AppData.goals`/`.targets`
+(required arrays, defaulting to `[]`; backward compatible — a pre-Goals/Targets backup missing
+either key still imports cleanly via `validateAppData`). `Goal` reuses the existing `Priority` scale;
+`Target` is a discriminated union (`numeric` | `yesno` | `linked-tasks`) with an `archived` boolean —
+Targets use Archive/Restore only, never a hard delete, matching this app's existing data-preservation
+model (Tasks: `archived` boolean; Projects: `status = 'archived'`). Archived Targets are excluded from
+their Goal's progress calculation; an archived-but-linked Task still counts toward a linked-tasks
+Target by its current completion status (archiving is a visibility filter elsewhere in this app, never
+a deletion). Goal progress is the equal-weight average of its non-archived Targets' progress (`null`,
+not 0, when a Goal has no Targets) — never stored, always derived (`getGoalProgress`/`getTargetProgress`
+in `src/store/reducer.ts`), consistent with every other aggregate in this app.
+
+- **Reducer**: `ADD_GOAL`, `UPDATE_GOAL`, `LINK_GOAL_PROJECT`, `UNLINK_GOAL_PROJECT`, `ADD_TARGET`,
+  `UPDATE_TARGET`, `ARCHIVE_TARGET`, `RESTORE_TARGET`, `REORDER_TARGET` (mirrors `REORDER_TASK`,
+  scoped to non-archived Targets within one Goal). `RESET` now clears goals/targets too.
+- **Database**: `supabase/migrations/20260908120000_add_goals_and_targets.sql` — `public.goals` and
+  `public.targets`, following the exact conventions of the Phase 2 schema (composite `(user_id, id)`
+  primary keys, four owner-only RLS policies each, the shared `set_updated_at()` trigger).
+  `goals.project_ids`/`targets.task_ids` are plain `text[]` array columns rather than join tables —
+  every view in this app queries fully-loaded in-memory `AppData`, never live SQL per render, so a
+  join table's indexed-reverse-lookup benefit is moot here. **Applied to the live Supabase project —
+  confirmed by the user on 2026-09-08.**
+- **Repository layer**: `src/repository/goalsRepository.ts`, `targetsRepository.ts` (`listX/createX/
+  upsertX/updateX/updateXGuarded` — no `deleteX`; Archive/Restore is an ordinary field update), plus
+  `Goal`/`Target` row and cloud types in `mappers.ts`/`types.ts`.
+- **Cloud sync activation** (this session): `SYNC_ENTITIES` (`src/sync/metadata.ts`) now includes
+  `'goal'`/`'target'`; `resolveDirtyTargets` (`src/sync/actionProvenance.ts`) marks the correct
+  record(s) dirty for every Goal/Target user-edit action, including both Targets whose `sortOrder`
+  swaps on `REORDER_TARGET`; `hydrateFromCloud.ts`, `refreshFromCloud.ts`, and `linkingChoice.ts`
+  (the "require-explicit-choice" flow) all read/write Goals and Targets alongside the original three
+  entities; `drainSync.ts` pushes Goals before Targets specifically (`targets.goal_id` is a real
+  foreign key, unlike tasks' nullable `project_id`, so a Target's first create can only succeed once
+  its Goal already exists in the cloud). Cloud-loaded data always includes `goals`/`targets`, even
+  when empty, closing a real hydration data-loss window: `EntityCounts`/`meaningfulLocalCounts` now
+  count Goals/Targets as populated local data (they can't be blank, same as Projects/Tasks — `ADD_GOAL`/
+  `ADD_TARGET` both refuse a blank name), so a device whose only local data is Goals/Targets is no
+  longer misreported as "empty" and can no longer be silently overwritten by an unattended cloud pull.
+  The Phase 5A `MigrationPanel`/`migration.ts` one-time upload flow is intentionally untouched — there
+  is no existing local Goals/Targets data predating this feature for it to migrate; new Goals/Targets
+  sync purely through the ordinary live push/pull path above.
+- **Known gap, not addressed this session**: `src/components/LinkingChoice.tsx`'s record-count summary
+  and "still syncing" deferred-count text still only read `.project`/`.task`/`.dailyNote` — Goal/Target
+  counts are computed correctly by the underlying `applyKeepLocalData`/`compareForLinking` logic but
+  are not yet surfaced in this dialog's copy. Left alone deliberately (no Goals-facing UI work this
+  session); worth closing before/alongside shipping the Goals UI.
+- **Not built yet, by design**: no navigation entry, no Goals list/detail view, no Goal/Target forms —
+  this session was foundation and sync-activation only.
+- Tests: `src/store/reducer.goals.test.ts` (45), extensive additions to `src/sync/actionProvenance.test.ts`,
+  `hydrateFromCloud.test.ts`, `refreshFromCloud.test.ts`, `drainSync.test.ts`, `linkingChoice.test.ts`,
+  `hydration.test.ts`, `metadata.test.ts`, plus new `src/repository/goalsRepository.test.ts`,
+  `targetsRepository.test.ts`, `src/storage/validation.test.ts`, and mechanical fixture updates
+  (`goals: [], targets: []`) across every existing test that builds a literal `AppData`/`CloudBundle`
+  object, now that both are required, non-optional shapes.
+
 ## Latest test results
 
 ```
 npm run test
-Test Files  44 passed (44)
-Tests       469 passed (469)
+Test Files  48 passed (48)
+Tests       606 passed (606)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
@@ -1061,15 +1117,16 @@ landed; 400 once the post-migration feature updates above — project archiving,
 `ArchivedProjectsPanel`, the sync-conflict fix's `refreshAcceptingServer`, and the new
 `CalendarView` — each added their own test files/cases; 424 once the optional project priority
 ranking feature added its own test coverage; 433 once the Tasks-tab triage-inbox change added its
-own test coverage; 469 now, after the Copy to AI feature above added its own formatter and
-interaction tests. Re-verified directly by running `npm run test` on 2026-09-07.)
+own test coverage; 469 once the Copy to AI feature above added its own formatter and interaction
+tests; 606 now, after the Goals and Targets data foundation and cloud-sync activation above. Verified
+directly by running `npm run test` on 2026-09-08.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-QQOicI-m.js   543.06 kB
+dist/assets/index-BCr_B0k_.js   556.70 kB
 ```
 
 (Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
@@ -1087,13 +1144,18 @@ phase where both are true. Grew to 538.00 kB after the post-migration feature up
 Shrank to 537.53 kB with the Tasks-tab triage-inbox change above — `TasksView.tsx` lost its
 search/filter UI and gained only a small selector, a net decrease. Grew to 543.06 kB with the Copy
 to AI feature above — `src/ai/aiSnapshot.ts` and `src/components/CopyToAIDialog.tsx` are genuinely
-reachable from the shipped app for the first time via `AppShell.tsx`. Re-verified directly by
-running `npm run build` on 2026-09-07.)
+reachable from the shipped app for the first time via `AppShell.tsx`. Grew to 556.70 kB with the
+Goals and Targets cloud-sync activation above — `goalsRepository.ts`/`targetsRepository.ts` and the
+extended `hydrateFromCloud.ts`/`refreshFromCloud.ts`/`drainSync.ts`/`linkingChoice.ts` are genuinely
+reachable from the shipped entry point already, since cloud sync is live (`CloudSyncContext.tsx`/
+`SyncEngineContext.tsx`/`LinkingChoice.tsx` are all wired into `App.tsx`), even though no Goals UI
+exists yet to create the data these paths sync. Verified directly by running `npm run build` on
+2026-09-08.)
 
 ## Lint
 
 ```
-npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by the Copy to AI feature)
+npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by the Goals and Targets work)
 ```
 
-(Re-verified directly by running `npm run lint` on 2026-09-07 — same 4 warnings, still 0 errors.)
+(Re-verified directly by running `npm run lint` on 2026-09-08 — same 4 warnings, still 0 errors.)

@@ -1,8 +1,10 @@
 import { listDailyNotes } from '../repository/dailyNotesRepository';
+import { listGoals } from '../repository/goalsRepository';
 import { listProjects } from '../repository/projectsRepository';
+import { listTargets } from '../repository/targetsRepository';
 import { listTasks } from '../repository/tasksRepository';
 import type { RepositoryResult } from '../repository/types';
-import type { AppData, DailyNote, Project, Task } from '../types';
+import type { AppData, DailyNote, Goal, Project, Target, Task } from '../types';
 import {
   clearDirty,
   getRecordUpdatedAt,
@@ -92,20 +94,22 @@ export async function refreshFromCloud(
   metadata: AccountSyncMetadata,
   acceptConflicts = false,
 ): Promise<RefreshOutcome | RefreshFailure> {
-  const [projectsResult, tasksResult, notesResult] = await Promise.all([
+  const [projectsResult, tasksResult, notesResult, goalsResult, targetsResult] = await Promise.all([
     listProjects(),
     listTasks(),
     listDailyNotes(),
+    listGoals(),
+    listTargets(),
   ]);
 
-  const failed = [projectsResult, tasksResult, notesResult].find(
+  const failed = [projectsResult, tasksResult, notesResult, goalsResult, targetsResult].find(
     (r): r is RepositoryResult<never> & { ok: false } => !r.ok,
   );
   if (failed) {
     return { ok: false, message: failed.error.message };
   }
   // Narrowed by the check above, but TS doesn't carry that through the array find.
-  if (!projectsResult.ok || !tasksResult.ok || !notesResult.ok) {
+  if (!projectsResult.ok || !tasksResult.ok || !notesResult.ok || !goalsResult.ok || !targetsResult.ok) {
     return { ok: false, message: 'Could not read your account data.' };
   }
 
@@ -133,11 +137,34 @@ export async function refreshFromCloud(
     metadata.dirty.dailyNote,
     acceptConflicts,
   );
+  const goals = refreshEntity<Goal, (typeof goalsResult.data)[number]>(
+    'goal',
+    local.goals,
+    goalsResult.data,
+    dailyNotes.metadata,
+    metadata.dirty.goal,
+    acceptConflicts,
+  );
+  const targets = refreshEntity<Target, (typeof targetsResult.data)[number]>(
+    'target',
+    local.targets,
+    targetsResult.data,
+    goals.metadata,
+    metadata.dirty.target,
+    acceptConflicts,
+  );
 
   return {
     ok: true,
-    changed: projects.changed || tasks.changed || dailyNotes.changed,
-    appData: { ...local, projects: projects.records, tasks: tasks.records, dailyNotes: dailyNotes.records },
-    metadata: dailyNotes.metadata,
+    changed: projects.changed || tasks.changed || dailyNotes.changed || goals.changed || targets.changed,
+    appData: {
+      ...local,
+      projects: projects.records,
+      tasks: tasks.records,
+      dailyNotes: dailyNotes.records,
+      goals: goals.records,
+      targets: targets.records,
+    },
+    metadata: targets.metadata,
   };
 }

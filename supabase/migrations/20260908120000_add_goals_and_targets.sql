@@ -1,10 +1,10 @@
 -- Add Goals and Targets
 -- Daily Compass
 --
--- PROPOSED MIGRATION — NOT YET EXECUTED.
--- Prepared for review only. Run it against the Supabase project manually
--- (e.g. via the SQL editor) when ready, the same way
--- 20260906120000_add_project_priority_rank.sql was applied.
+-- APPLIED. This migration has been executed against the live Supabase
+-- project, confirmed by the user. public.goals and public.targets now
+-- exist in production. Kept here as the historical record of what was
+-- run; do not re-run it.
 --
 -- Scope: two new tables only — public.goals and public.targets — following
 -- exactly the schema conventions established by

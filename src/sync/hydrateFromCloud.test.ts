@@ -1,15 +1,26 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { AppData, DailyNote, Project, Task } from '../types';
+import type { AppData, DailyNote, Goal, Project, Target, Task } from '../types';
 import { createEmptyAppData } from '../types';
-import type { CloudDailyNote, CloudProject, CloudTask, RepositoryResult } from '../repository/types';
+import type {
+  CloudDailyNote,
+  CloudGoal,
+  CloudProject,
+  CloudTarget,
+  CloudTask,
+  RepositoryResult,
+} from '../repository/types';
 
 const projectsRepo = vi.hoisted(() => ({ listProjects: vi.fn() }));
 const tasksRepo = vi.hoisted(() => ({ listTasks: vi.fn() }));
 const dailyNotesRepo = vi.hoisted(() => ({ listDailyNotes: vi.fn() }));
+const goalsRepo = vi.hoisted(() => ({ listGoals: vi.fn() }));
+const targetsRepo = vi.hoisted(() => ({ listTargets: vi.fn() }));
 
 vi.mock('../repository/projectsRepository', () => projectsRepo);
 vi.mock('../repository/tasksRepository', () => tasksRepo);
 vi.mock('../repository/dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('../repository/goalsRepository', () => goalsRepo);
+vi.mock('../repository/targetsRepository', () => targetsRepo);
 
 import { hydrateFromCloud } from './hydrateFromCloud';
 
@@ -32,6 +43,16 @@ const task: Task = {
   archived: false,
 };
 const note: DailyNote = { id: 'note-1', date: '2026-08-30', morning: 'Plan', evening: 'Review' };
+const goal: Goal = { id: 'goal-1', name: 'Ship it', priority: 'Normal', status: 'active', projectIds: [] };
+const target: Target = {
+  id: 'target-1',
+  goalId: 'goal-1',
+  name: 'Milestone',
+  sortOrder: 0,
+  archived: false,
+  type: 'yesno',
+  achieved: false,
+};
 
 function cloudProject(overrides: Partial<CloudProject> = {}): CloudProject {
   return { ...project, updatedAt: '2026-08-30T01:00:00.000Z', ...overrides };
@@ -41,6 +62,12 @@ function cloudTask(overrides: Partial<CloudTask> = {}): CloudTask {
 }
 function cloudNote(overrides: Partial<CloudDailyNote> = {}): CloudDailyNote {
   return { ...note, updatedAt: '2026-08-30T01:00:00.000Z', ...overrides };
+}
+function cloudGoal(overrides: Partial<CloudGoal> = {}): CloudGoal {
+  return { ...goal, updatedAt: '2026-08-30T01:00:00.000Z', ...overrides };
+}
+function cloudTarget(overrides: Partial<Extract<CloudTarget, { type: 'yesno' }>> = {}): CloudTarget {
+  return { ...target, updatedAt: '2026-08-30T01:00:00.000Z', ...overrides } as CloudTarget;
 }
 
 function emptyLocal(): AppData {
@@ -63,6 +90,11 @@ function blankNote(overrides: Partial<DailyNote> = {}): DailyNote {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default to empty for every existing test, which only cares about
+  // project/task/dailyNote behavior — tests below that specifically cover
+  // Goals/Targets override these explicitly.
+  goalsRepo.listGoals.mockResolvedValue(ok([]));
+  targetsRepo.listTargets.mockResolvedValue(ok([]));
 });
 
 describe('hydrateFromCloud', () => {
@@ -75,18 +107,22 @@ describe('hydrateFromCloud', () => {
     expect(projectsRepo.listProjects).not.toHaveBeenCalled();
     expect(tasksRepo.listTasks).not.toHaveBeenCalled();
     expect(dailyNotesRepo.listDailyNotes).not.toHaveBeenCalled();
+    expect(goalsRepo.listGoals).not.toHaveBeenCalled();
+    expect(targetsRepo.listTargets).not.toHaveBeenCalled();
   });
 
-  it('successfully hydrates when the cloud has data and local is empty', async () => {
+  it('successfully hydrates when the cloud has data and local is empty, including goals and targets', async () => {
     projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
     tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
     dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+    goalsRepo.listGoals.mockResolvedValue(ok([cloudGoal()]));
+    targetsRepo.listTargets.mockResolvedValue(ok([cloudTarget()]));
 
     const result = await hydrateFromCloud(emptyLocal(), 'signedIn', false);
 
     expect(result.decision).toEqual({ kind: 'hydrate-from-cloud' });
-    expect(result.cloudCounts).toEqual({ projects: 1, tasks: 1, dailyNotes: 1 });
-    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0 });
+    expect(result.cloudCounts).toEqual({ projects: 1, tasks: 1, dailyNotes: 1, goals: 1, targets: 1 });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0, goals: 0, targets: 0 });
     expect(result.hydrated).toBeDefined();
     // The app-shaped data must not carry the cloud-only `updatedAt` field.
     expect(result.hydrated?.appData).toEqual({
@@ -94,11 +130,61 @@ describe('hydrateFromCloud', () => {
       projects: [project],
       tasks: [task],
       dailyNotes: [note],
+      goals: [goal],
+      targets: [target],
     });
     // The raw cloud records (with updatedAt) are still available for sync metadata seeding.
     expect(result.hydrated?.projects[0].updatedAt).toBe('2026-08-30T01:00:00.000Z');
     expect(result.hydrated?.tasks[0].updatedAt).toBe('2026-08-30T01:00:00.000Z');
     expect(result.hydrated?.dailyNotes[0].updatedAt).toBe('2026-08-30T01:00:00.000Z');
+    expect(result.hydrated?.goals[0].updatedAt).toBe('2026-08-30T01:00:00.000Z');
+    expect(result.hydrated?.targets[0].updatedAt).toBe('2026-08-30T01:00:00.000Z');
+  });
+
+  it('a device with local Goals/Targets but no tasks/projects/notes is correctly reported as populated, not empty (closes the hydration data-loss window)', async () => {
+    // Before Goals/Targets counted toward "local meaningful data," this
+    // scenario would have been misreported as local-empty, and a
+    // hydrate-from-cloud LOAD would have silently discarded these local
+    // Goals/Targets (see meaningfulLocalCounts's doc comment).
+    const localWithGoalsOnly: AppData = { ...createEmptyAppData(), goals: [goal], targets: [target] };
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+
+    const result = await hydrateFromCloud(localWithGoalsOnly, 'signedIn', false);
+
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0, goals: 1, targets: 1 });
+    expect(result.decision).toEqual({ kind: 'require-explicit-choice' });
+    expect(result.hydrated).toBeUndefined();
+  });
+
+  it('hydrating from an account with no Goals/Targets yet still populates both fields as empty arrays, never undefined', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+    // goalsRepo/targetsRepo already default to ok([]) in beforeEach.
+
+    const result = await hydrateFromCloud(emptyLocal(), 'signedIn', false);
+
+    expect(result.decision).toEqual({ kind: 'hydrate-from-cloud' });
+    expect(result.hydrated?.appData.goals).toEqual([]);
+    expect(result.hydrated?.appData.targets).toEqual([]);
+  });
+
+  it('surfaces a goals/targets repository failure as a recoverable cloud-query-failed decision, same as any other entity', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([]));
+    tasksRepo.listTasks.mockResolvedValue(ok([]));
+    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+    goalsRepo.listGoals.mockResolvedValue(err('database', 'goals query failed'));
+
+    const result = await hydrateFromCloud(emptyLocal(), 'signedIn', false);
+
+    expect(result.decision).toEqual({
+      kind: 'cloud-query-failed',
+      errorType: 'database',
+      message: 'goals query failed',
+    });
+    expect(result.hydrated).toBeUndefined();
   });
 
   it('reports both-empty and does not hydrate when both cloud and local have no data', async () => {
@@ -151,7 +237,7 @@ describe('hydrateFromCloud', () => {
     const result = await hydrateFromCloud(phoneLocal, 'signedIn', false);
 
     expect(result.decision).toEqual({ kind: 'hydrate-from-cloud' });
-    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0 });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0, goals: 0, targets: 0 });
     expect(result.hydrated).toBeDefined();
     expect(result.hydrated?.appData.projects).toHaveLength(2);
   });
@@ -172,7 +258,7 @@ describe('hydrateFromCloud', () => {
     const result = await hydrateFromCloud(morningOnly, 'signedIn', false);
 
     expect(result.decision).toEqual({ kind: 'require-explicit-choice' });
-    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 1 });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 1, goals: 0, targets: 0 });
     expect(result.hydrated).toBeUndefined();
   });
 
@@ -189,7 +275,7 @@ describe('hydrateFromCloud', () => {
     const result = await hydrateFromCloud(whitespaceOnly, 'signedIn', false);
 
     expect(result.decision).toEqual({ kind: 'hydrate-from-cloud' });
-    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0 });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 0, dailyNotes: 0, goals: 0, targets: 0 });
   });
 
   it('does not weaken protection: a real archived task still counts as populated local data and blocks hydration', async () => {
@@ -211,7 +297,7 @@ describe('hydrateFromCloud', () => {
     const result = await hydrateFromCloud(archivedOnly, 'signedIn', false);
 
     expect(result.decision).toEqual({ kind: 'require-explicit-choice' });
-    expect(result.localCounts).toEqual({ projects: 0, tasks: 1, dailyNotes: 0 });
+    expect(result.localCounts).toEqual({ projects: 0, tasks: 1, dailyNotes: 0, goals: 0, targets: 0 });
     expect(result.hydrated).toBeUndefined();
   });
 
@@ -241,7 +327,7 @@ describe('hydrateFromCloud', () => {
     expect(result.hydrated).toBeUndefined();
     expect(result.cloudCounts).toBeUndefined();
     // Local counts are still reported (read before the cloud call), so a caller can show what is safely preserved.
-    expect(result.localCounts).toEqual({ projects: 1, tasks: 1, dailyNotes: 1 });
+    expect(result.localCounts).toEqual({ projects: 1, tasks: 1, dailyNotes: 1, goals: 0, targets: 0 });
   });
 
   it('surfaces an unauthenticated repository failure the same way as any other cloud-query-failed error', async () => {

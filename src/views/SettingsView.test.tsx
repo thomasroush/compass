@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   // an imported function here would throw a TDZ ReferenceError. The real
   // value is set in beforeEach below, once imports are available.
   appState: {
-    current: { version: 1, tasks: [], projects: [], dailyNotes: [] } as AppData,
+    current: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] } as AppData,
     dispatch: vi.fn(),
   },
   authState: { isSupabaseConfigured: true, user: null as { id: string; email: string } | null },

@@ -12,7 +12,7 @@
  * account's markers (see getAccountMetadata below).
  */
 
-export const SYNC_ENTITIES = ['project', 'task', 'dailyNote'] as const;
+export const SYNC_ENTITIES = ['project', 'task', 'dailyNote', 'goal', 'target'] as const;
 export type SyncEntity = (typeof SYNC_ENTITIES)[number];
 
 export interface EntitySyncRecord {
@@ -51,8 +51,8 @@ export function createEmptyAccountMetadata(accountId: string): AccountSyncMetada
     accountId,
     established: false,
     lastSyncedAt: null,
-    records: { project: {}, task: {}, dailyNote: {} },
-    dirty: { project: [], task: [], dailyNote: [] },
+    records: { project: {}, task: {}, dailyNote: {}, goal: {}, target: {} },
+    dirty: { project: [], task: [], dailyNote: [], goal: [], target: [] },
   };
 }
 
@@ -127,7 +127,7 @@ export function clearDirty(metadata: AccountSyncMetadata, entity: SyncEntity, id
  * goes through `clearDirty`, one confirmed id at a time).
  */
 export function clearAllDirty(metadata: AccountSyncMetadata): AccountSyncMetadata {
-  return { ...metadata, dirty: { project: [], task: [], dailyNote: [] } };
+  return { ...metadata, dirty: { project: [], task: [], dailyNote: [], goal: [], target: [] } };
 }
 
 export function hasDirtyWork(metadata: AccountSyncMetadata): boolean {

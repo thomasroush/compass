@@ -7,7 +7,7 @@ import { getAccountMetadata } from '../sync/metadata';
 import { loadSyncMetadataStore } from '../sync/metadataStorage';
 
 const appState = vi.hoisted(() => ({
-  current: { version: 1, tasks: [], projects: [], dailyNotes: [] } as AppData,
+  current: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] } as AppData,
   dispatch: vi.fn(),
 }));
 const authState = vi.hoisted(() => ({
