@@ -2,10 +2,18 @@ import {
   AppData,
   createEmptyAppData,
   DailyNote,
+  GOAL_STATUSES,
+  Goal,
+  GoalStatus,
   PRIORITIES,
   PROJECT_STATUSES,
   Project,
+  TARGET_TYPES,
+  TARGET_VALUE_FORMATS,
   TASK_STATUSES,
+  Target,
+  TargetType,
+  TargetValueFormat,
   Task,
   TaskStatus,
 } from '../types';
@@ -87,6 +95,81 @@ function validateProject(value: unknown): Project | null {
   };
 }
 
+function isGoalStatus(value: unknown): value is GoalStatus {
+  return isString(value) && (GOAL_STATUSES as readonly string[]).includes(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+function validateGoal(value: unknown): Goal | null {
+  if (!value || typeof value !== 'object') return null;
+  const g = value as Record<string, unknown>;
+  if (!isString(g.id) || !g.id) return null;
+  if (!isString(g.name)) return null;
+  if (!isString(g.priority) || !(PRIORITIES as readonly string[]).includes(g.priority)) return null;
+  if (!isGoalStatus(g.status)) return null;
+  if (!isOptionalString(g.description)) return null;
+  if (g.dueDate !== undefined && !isString(g.dueDate)) return null;
+  if (!isStringArray(g.projectIds)) return null;
+
+  return {
+    id: g.id,
+    name: g.name,
+    description: g.description,
+    dueDate: g.dueDate as string | undefined,
+    priority: g.priority as Goal['priority'],
+    status: g.status,
+    projectIds: g.projectIds,
+  };
+}
+
+function isTargetType(value: unknown): value is TargetType {
+  return isString(value) && (TARGET_TYPES as readonly string[]).includes(value);
+}
+
+function isTargetValueFormat(value: unknown): value is TargetValueFormat {
+  return isString(value) && (TARGET_VALUE_FORMATS as readonly string[]).includes(value);
+}
+
+function validateTarget(value: unknown): Target | null {
+  if (!value || typeof value !== 'object') return null;
+  const t = value as Record<string, unknown>;
+  if (!isString(t.id) || !t.id) return null;
+  if (!isString(t.goalId) || !t.goalId) return null;
+  if (!isString(t.name)) return null;
+  if (!isNumber(t.sortOrder)) return null;
+  if (!isBoolean(t.archived)) return null;
+  if (!isTargetType(t.type)) return null;
+
+  const base = { id: t.id, goalId: t.goalId, name: t.name, sortOrder: t.sortOrder, archived: t.archived };
+
+  if (t.type === 'numeric') {
+    if (!isNumber(t.startValue) || !isNumber(t.currentValue) || !isNumber(t.targetValue)) return null;
+    if (!isOptionalString(t.unit)) return null;
+    if (t.valueFormat !== undefined && !isTargetValueFormat(t.valueFormat)) return null;
+    return {
+      ...base,
+      type: 'numeric',
+      startValue: t.startValue,
+      currentValue: t.currentValue,
+      targetValue: t.targetValue,
+      unit: t.unit,
+      valueFormat: (t.valueFormat as TargetValueFormat | undefined) ?? 'number',
+    };
+  }
+
+  if (t.type === 'yesno') {
+    if (!isBoolean(t.achieved)) return null;
+    return { ...base, type: 'yesno', achieved: t.achieved };
+  }
+
+  // 'linked-tasks'
+  if (!isStringArray(t.taskIds)) return null;
+  return { ...base, type: 'linked-tasks', taskIds: t.taskIds };
+}
+
 function validateDailyNote(value: unknown): DailyNote | null {
   if (!value || typeof value !== 'object') return null;
   const n = value as Record<string, unknown>;
@@ -126,6 +209,16 @@ export function validateAppData(raw: unknown): ValidationResult {
     return { ok: false, error: 'Daily notes must be an array.' };
   }
 
+  // Backward compatibility: a backup taken before Goals/Targets existed has
+  // no `goals`/`targets` key at all — treat that as an empty array, but
+  // still reject the key when present with the wrong shape.
+  if (obj.goals !== undefined && !Array.isArray(obj.goals)) {
+    return { ok: false, error: 'Goals must be an array.' };
+  }
+  if (obj.targets !== undefined && !Array.isArray(obj.targets)) {
+    return { ok: false, error: 'Targets must be an array.' };
+  }
+
   const tasks: Task[] = [];
   for (let i = 0; i < obj.tasks.length; i++) {
     const task = validateTask(obj.tasks[i]);
@@ -161,9 +254,45 @@ export function validateAppData(raw: unknown): ValidationResult {
     ids.add(task.id);
   }
 
+  const rawGoals = Array.isArray(obj.goals) ? obj.goals : [];
+  const goals: Goal[] = [];
+  for (let i = 0; i < rawGoals.length; i++) {
+    const goal = validateGoal(rawGoals[i]);
+    if (!goal) {
+      return { ok: false, error: `Invalid goal at index ${i}.` };
+    }
+    goals.push(goal);
+  }
+
+  const rawTargets = Array.isArray(obj.targets) ? obj.targets : [];
+  const targets: Target[] = [];
+  for (let i = 0; i < rawTargets.length; i++) {
+    const target = validateTarget(rawTargets[i]);
+    if (!target) {
+      return { ok: false, error: `Invalid target at index ${i}.` };
+    }
+    targets.push(target);
+  }
+
+  const goalIds = new Set<string>();
+  for (const goal of goals) {
+    if (goalIds.has(goal.id)) {
+      return { ok: false, error: `Duplicate goal id: ${goal.id}.` };
+    }
+    goalIds.add(goal.id);
+  }
+
+  const targetIds = new Set<string>();
+  for (const target of targets) {
+    if (targetIds.has(target.id)) {
+      return { ok: false, error: `Duplicate target id: ${target.id}.` };
+    }
+    targetIds.add(target.id);
+  }
+
   return {
     ok: true,
-    data: { version: 1, tasks, projects, dailyNotes },
+    data: { version: 1, tasks, projects, dailyNotes, goals, targets },
   };
 }
 

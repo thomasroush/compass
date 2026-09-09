@@ -1,9 +1,16 @@
 -- Phase 2 — Database schema and Row Level Security
 -- Daily Compass (see AGENTS.md "Cloud Sync (Supabase)" and SUPABASE_IMPLEMENTATION_PLAN.md, Phase 2)
 --
--- PROPOSED MIGRATION — NOT EXECUTED.
--- This file is prepared for review only. Do not run it against the Supabase project until
--- it has been approved and Phase 2's manual cross-account verification is planned.
+-- APPLIED. This migration has been executed against the live Supabase project
+-- and cross-account-verified — see BUILD_STATUS.md, "Phase 2 — Database
+-- schema and Row Level Security (applied)": public.projects, public.tasks,
+-- and public.daily_notes all exist with composite (user_id, id) primary
+-- keys, RLS enabled, and four owner-only policies each, confirmed against
+-- the applied schema with no drift from this file. Kept here as the
+-- historical record of what was run; do not re-run it. (An earlier revision
+-- of this comment read "PROPOSED MIGRATION — NOT EXECUTED" — that was true
+-- only before this migration was actually applied and was never updated
+-- afterward; it did not reflect the live database's real state.)
 --
 -- Scope: schema and Row Level Security only. No authentication, sync, or application code.
 -- Uses only the schema owner's normal migration privileges — no service_role, no

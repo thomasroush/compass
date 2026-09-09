@@ -46,11 +46,64 @@ export interface DailyNote {
   evening: string;
 }
 
+export const GOAL_STATUSES = ['active', 'achieved', 'paused', 'abandoned'] as const;
+export type GoalStatus = (typeof GOAL_STATUSES)[number];
+
+export interface Goal {
+  id: string;
+  name: string;
+  description?: string;
+  dueDate?: string;
+  /** Reuses the existing Task priority scale rather than a separate Goal-specific one. */
+  priority: Priority;
+  status: GoalStatus;
+  /** Ids of Projects (owned by the same user) this Goal contributes to. */
+  projectIds: string[];
+}
+
+export const TARGET_TYPES = ['numeric', 'yesno', 'linked-tasks'] as const;
+export type TargetType = (typeof TARGET_TYPES)[number];
+
+export const TARGET_VALUE_FORMATS = ['number', 'currency'] as const;
+export type TargetValueFormat = (typeof TARGET_VALUE_FORMATS)[number];
+
+interface TargetBase {
+  id: string;
+  goalId: string;
+  name: string;
+  sortOrder: number;
+  /** Archived Targets are excluded from their Goal's progress calculation but never deleted. */
+  archived: boolean;
+}
+
+export type Target =
+  | (TargetBase & {
+      type: 'numeric';
+      startValue: number;
+      currentValue: number;
+      targetValue: number;
+      unit?: string;
+      valueFormat: TargetValueFormat;
+    })
+  | (TargetBase & { type: 'yesno'; achieved: boolean })
+  | (TargetBase & { type: 'linked-tasks'; taskIds: string[] });
+
 export interface AppData {
   version: 1;
   tasks: Task[];
   projects: Project[];
   dailyNotes: DailyNote[];
+  /**
+   * Optional (not required) specifically so that AppData literals built by
+   * code that predates Goals/Targets — the live cloud hydration/refresh path
+   * in src/sync/, in particular — continue to compile and behave exactly as
+   * before without modification. Every code path this app's own reducer and
+   * validation own always populates these as concrete arrays; only a LOAD
+   * dispatched from unmodified hydration code could leave them undefined.
+   * Treat as `Goal[] | []`/`Target[] | []` everywhere, never assume defined.
+   */
+  goals?: Goal[];
+  targets?: Target[];
 }
 
 export const STORAGE_KEY = 'daily-compass-v1';
@@ -61,6 +114,8 @@ export function createEmptyAppData(): AppData {
     tasks: [],
     projects: [],
     dailyNotes: [],
+    goals: [],
+    targets: [],
   };
 }
 

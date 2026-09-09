@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import type { DailyNote, Project, Task } from '../types';
+import type { DailyNote, Goal, Project, Target, Task } from '../types';
 import {
   dailyNoteFromRow,
   dailyNoteToInsertRow,
   dailyNoteUpdatesToRow,
+  goalFromRow,
+  goalToInsertRow,
+  goalUpdatesToRow,
   projectFromRow,
   projectToInsertRow,
   projectUpdatesToRow,
+  targetFromRow,
+  targetToInsertRow,
+  targetUpdatesToRow,
   taskFromRow,
   taskToInsertRow,
   taskUpdatesToRow,
@@ -218,5 +224,236 @@ describe('daily note mapping', () => {
   it('builds an update row containing only the fields that were provided', () => {
     expect(dailyNoteUpdatesToRow({ evening: 'Updated' })).toEqual({ evening_notes: 'Updated' });
     expect(dailyNoteUpdatesToRow({})).toEqual({});
+  });
+});
+
+describe('goal mapping', () => {
+  it('maps a full row to the app shape, preserving updated_at', () => {
+    const cloud = goalFromRow({
+      id: 'g1',
+      name: 'Ship it',
+      description: 'Launch the thing',
+      due_date: '2026-12-31',
+      priority: 'High',
+      status: 'active',
+      project_ids: ['p1', 'p2'],
+      updated_at: '2026-09-08T00:00:00.000Z',
+    });
+    expect(cloud).toEqual({
+      id: 'g1',
+      name: 'Ship it',
+      description: 'Launch the thing',
+      dueDate: '2026-12-31',
+      priority: 'High',
+      status: 'active',
+      projectIds: ['p1', 'p2'],
+      updatedAt: '2026-09-08T00:00:00.000Z',
+    });
+  });
+
+  it('maps null description/due_date to undefined, not null', () => {
+    const cloud = goalFromRow({
+      id: 'g1',
+      name: 'Ship it',
+      description: null,
+      due_date: null,
+      priority: 'Normal',
+      status: 'active',
+      project_ids: [],
+      updated_at: 'ts',
+    });
+    expect(cloud.description).toBeUndefined();
+    expect(cloud.dueDate).toBeUndefined();
+  });
+
+  it('builds an insert row scoped to the given user id, with undefined description/dueDate as null', () => {
+    const goal: Goal = { id: 'g1', name: 'Ship it', priority: 'Normal', status: 'active', projectIds: ['p1'] };
+    expect(goalToInsertRow('user-1', goal)).toEqual({
+      id: 'g1',
+      user_id: 'user-1',
+      name: 'Ship it',
+      description: null,
+      due_date: null,
+      priority: 'Normal',
+      status: 'active',
+      project_ids: ['p1'],
+    });
+  });
+
+  it('builds an update row containing only the fields that were provided, with an explicit undefined as null', () => {
+    expect(goalUpdatesToRow({ status: 'achieved' })).toEqual({ status: 'achieved' });
+    expect(goalUpdatesToRow({ description: undefined })).toEqual({ description: null });
+    expect(goalUpdatesToRow({})).toEqual({});
+  });
+});
+
+describe('target mapping', () => {
+  it('maps a numeric row to the app shape', () => {
+    const cloud = targetFromRow({
+      id: 't1',
+      goal_id: 'g1',
+      type: 'numeric',
+      name: 'Revenue',
+      sort_order: 0,
+      archived: false,
+      start_value: 0,
+      current_value: 10,
+      target_value: 100,
+      unit: '$',
+      value_format: 'currency',
+      achieved: null,
+      task_ids: [],
+      updated_at: 'ts',
+    });
+    expect(cloud).toEqual({
+      id: 't1',
+      goalId: 'g1',
+      name: 'Revenue',
+      sortOrder: 0,
+      archived: false,
+      type: 'numeric',
+      startValue: 0,
+      currentValue: 10,
+      targetValue: 100,
+      unit: '$',
+      valueFormat: 'currency',
+      updatedAt: 'ts',
+    });
+  });
+
+  it('maps a null unit/value_format to undefined/"number" respectively', () => {
+    const cloud = targetFromRow({
+      id: 't1',
+      goal_id: 'g1',
+      type: 'numeric',
+      name: 'Weight',
+      sort_order: 0,
+      archived: false,
+      start_value: 170,
+      current_value: 168,
+      target_value: 165,
+      unit: null,
+      value_format: null,
+      achieved: null,
+      task_ids: [],
+      updated_at: 'ts',
+    });
+    expect(cloud?.type === 'numeric' && cloud.unit).toBeUndefined();
+    expect(cloud?.type === 'numeric' && cloud.valueFormat).toBe('number');
+  });
+
+  it('returns null for a numeric row missing a required numeric field (defends against a constraint violation)', () => {
+    const cloud = targetFromRow({
+      id: 't1',
+      goal_id: 'g1',
+      type: 'numeric',
+      name: 'Revenue',
+      sort_order: 0,
+      archived: false,
+      start_value: null,
+      current_value: 10,
+      target_value: 100,
+      unit: null,
+      value_format: null,
+      achieved: null,
+      task_ids: [],
+      updated_at: 'ts',
+    });
+    expect(cloud).toBeNull();
+  });
+
+  it('maps a yes/no row to the app shape', () => {
+    const cloud = targetFromRow({
+      id: 't2',
+      goal_id: 'g1',
+      type: 'yesno',
+      name: 'Milestone',
+      sort_order: 1,
+      archived: true,
+      start_value: null,
+      current_value: null,
+      target_value: null,
+      unit: null,
+      value_format: null,
+      achieved: true,
+      task_ids: [],
+      updated_at: 'ts',
+    });
+    expect(cloud).toEqual({
+      id: 't2',
+      goalId: 'g1',
+      name: 'Milestone',
+      sortOrder: 1,
+      archived: true,
+      type: 'yesno',
+      achieved: true,
+      updatedAt: 'ts',
+    });
+  });
+
+  it('maps a linked-tasks row to the app shape', () => {
+    const cloud = targetFromRow({
+      id: 't3',
+      goal_id: 'g1',
+      type: 'linked-tasks',
+      name: 'Contract work',
+      sort_order: 2,
+      archived: false,
+      start_value: null,
+      current_value: null,
+      target_value: null,
+      unit: null,
+      value_format: null,
+      achieved: null,
+      task_ids: ['task-1', 'task-2'],
+      updated_at: 'ts',
+    });
+    expect(cloud).toEqual({
+      id: 't3',
+      goalId: 'g1',
+      name: 'Contract work',
+      sortOrder: 2,
+      archived: false,
+      type: 'linked-tasks',
+      taskIds: ['task-1', 'task-2'],
+      updatedAt: 'ts',
+    });
+  });
+
+  it('builds an insert row with only the current type\'s columns populated, others null', () => {
+    const target: Target = {
+      id: 't1',
+      goalId: 'g1',
+      name: 'Revenue',
+      sortOrder: 0,
+      archived: false,
+      type: 'numeric',
+      startValue: 0,
+      currentValue: 10,
+      targetValue: 100,
+      valueFormat: 'number',
+    };
+    expect(targetToInsertRow('user-1', target)).toEqual({
+      id: 't1',
+      user_id: 'user-1',
+      goal_id: 'g1',
+      type: 'numeric',
+      name: 'Revenue',
+      sort_order: 0,
+      archived: false,
+      start_value: 0,
+      current_value: 10,
+      target_value: 100,
+      unit: null,
+      value_format: 'number',
+      achieved: null,
+      task_ids: [],
+    });
+  });
+
+  it('builds an update row containing only the fields that were provided', () => {
+    expect(targetUpdatesToRow({ archived: true })).toEqual({ archived: true });
+    expect(targetUpdatesToRow({ currentValue: 42 })).toEqual({ current_value: 42 });
+    expect(targetUpdatesToRow({})).toEqual({});
   });
 });

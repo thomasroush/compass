@@ -26,6 +26,11 @@ function sampleData(): AppData {
     ],
     projects: [{ id: 'p1', name: 'Home', status: 'active' }],
     dailyNotes: [{ id: 'n1', date: '2026-08-28', morning: 'Focus', evening: 'Done' }],
+    // validateAppData now always normalizes goals/targets to [] when absent
+    // (backward compatibility with pre-Goals/Targets backups) — included
+    // here explicitly so round-trips through parseJsonAppData compare equal.
+    goals: [],
+    targets: [],
   };
 }
 

@@ -42,6 +42,15 @@ export function classifyActionProvenance(action: AppAction): ActionProvenance {
     case 'ADD_PROJECT':
     case 'UPDATE_PROJECT':
     case 'UPSERT_DAILY_NOTE':
+    case 'ADD_GOAL':
+    case 'UPDATE_GOAL':
+    case 'LINK_GOAL_PROJECT':
+    case 'UNLINK_GOAL_PROJECT':
+    case 'ADD_TARGET':
+    case 'UPDATE_TARGET':
+    case 'ARCHIVE_TARGET':
+    case 'RESTORE_TARGET':
+    case 'REORDER_TARGET':
       return 'user-edit';
 
     case 'LOAD':
@@ -250,6 +259,25 @@ export function resolveDirtyTargets(action: AppAction, prevState: AppData): Dirt
       if ((!morning.trim() && !evening.trim()) || !action.id) return [];
       return [{ entity: 'dailyNote', id: action.id }];
     }
+
+    // Goals/Targets foundation stage: these are real 'user-edit' actions
+    // (classified above) but deliberately never produce a dirty target here.
+    // 'goal'/'target' are not yet SyncEntity values (see src/sync/metadata.ts
+    // — untouched this stage), so there is nothing valid to return them as,
+    // and no drain loop yet reads a 'goal'/'target' dirty list regardless.
+    // This intentionally leaves Goal/Target edits unsynced until a later,
+    // explicit sync-activation stage extends SYNC_ENTITIES and this
+    // function together.
+    case 'ADD_GOAL':
+    case 'UPDATE_GOAL':
+    case 'LINK_GOAL_PROJECT':
+    case 'UNLINK_GOAL_PROJECT':
+    case 'ADD_TARGET':
+    case 'UPDATE_TARGET':
+    case 'ARCHIVE_TARGET':
+    case 'RESTORE_TARGET':
+    case 'REORDER_TARGET':
+      return [];
 
     case 'LOAD':
     case 'IMPORT':

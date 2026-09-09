@@ -1,13 +1,16 @@
-import type { DailyNote, Project, Task } from '../types';
+import type { DailyNote, Goal, Project, Target, Task } from '../types';
 
 /**
  * App-shaped records as read from Supabase, augmented with the database's
- * `updated_at`. The app's own Task/Project/DailyNote types stay unchanged —
- * `updatedAt` is cloud-only, kept for a later phase's conflict handling.
+ * `updated_at`. The app's own Task/Project/DailyNote/Goal/Target types stay
+ * unchanged — `updatedAt` is cloud-only, kept for a later phase's conflict
+ * handling.
  */
 export type CloudProject = Project & { updatedAt: string };
 export type CloudTask = Task & { updatedAt: string };
 export type CloudDailyNote = DailyNote & { updatedAt: string };
+export type CloudGoal = Goal & { updatedAt: string };
+export type CloudTarget = Target & { updatedAt: string };
 
 /**
  * 'conflict' is returned only by a guarded (compare-and-swap) update whose

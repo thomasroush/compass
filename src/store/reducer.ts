@@ -1,4 +1,16 @@
-import { AppData, DailyNote, Priority, Project, Task, TaskStatus, todayDateString } from '../types';
+import {
+  AppData,
+  DailyNote,
+  Goal,
+  GoalStatus,
+  Priority,
+  Project,
+  Target,
+  TargetValueFormat,
+  Task,
+  TaskStatus,
+  todayDateString,
+} from '../types';
 
 export function isOverdue(task: Task, today = todayDateString()): boolean {
   if (task.archived || task.status === 'Done' || !task.dueDate) return false;
@@ -72,6 +84,87 @@ export function getArchivedProjects(projects: Project[]): Project[] {
   return projects.filter((p) => p.status === 'archived');
 }
 
+/** Goals hide 'abandoned' from the default list view, mirroring getVisibleProjects. */
+export function getVisibleGoals(goals: Goal[]): Goal[] {
+  return goals.filter((g) => g.status !== 'abandoned');
+}
+
+export function getProjectGoals(goals: Goal[], projectId: string): Goal[] {
+  return goals.filter((g) => g.projectIds.includes(projectId));
+}
+
+/** A Goal's non-archived Targets, in display/reorder order. Archived Targets are excluded. */
+export function getGoalTargets(targets: Target[], goalId: string): Target[] {
+  return targets
+    .filter((t) => t.goalId === goalId && !t.archived)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+/** A Goal's archived Targets — surfaced only for the "show archived targets" restore UI. */
+export function getArchivedGoalTargets(targets: Target[], goalId: string): Target[] {
+  return targets.filter((t) => t.goalId === goalId && t.archived);
+}
+
+export function nextTargetSortOrder(targets: Target[], goalId: string): number {
+  const inGoal = targets.filter((t) => t.goalId === goalId && !t.archived);
+  if (inGoal.length === 0) return 0;
+  return Math.max(...inGoal.map((t) => t.sortOrder)) + 1;
+}
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n));
+}
+
+/**
+ * A single Target's progress, 0-100. Numeric direction (increasing vs.
+ * decreasing) is inferred from startValue vs. targetValue rather than stored
+ * separately. Linked-tasks progress is completed/total among tasks that
+ * still exist locally (a stale/missing id is silently dropped from both);
+ * an archived-but-linked task still counts by its current status — archiving
+ * is a visibility flag elsewhere in this app, never a deletion, so it must
+ * not silently change a Target's denominator. A reopened (Done -> other
+ * status) task drops out of the completed count automatically on the next
+ * call, since this is always computed live, never cached.
+ */
+export function getTargetProgress(target: Target, tasks: Task[]): number {
+  switch (target.type) {
+    case 'numeric': {
+      const { startValue, currentValue, targetValue } = target;
+      if (targetValue === startValue) {
+        return currentValue >= targetValue ? 100 : 0;
+      }
+      const raw =
+        targetValue > startValue
+          ? (currentValue - startValue) / (targetValue - startValue)
+          : (startValue - currentValue) / (startValue - targetValue);
+      return clamp01(raw) * 100;
+    }
+    case 'yesno':
+      return target.achieved ? 100 : 0;
+    case 'linked-tasks': {
+      const linked = target.taskIds
+        .map((id) => tasks.find((t) => t.id === id))
+        .filter((t): t is Task => t !== undefined);
+      if (linked.length === 0) return 0;
+      const completed = linked.filter((t) => t.status === 'Done').length;
+      return (completed / linked.length) * 100;
+    }
+  }
+}
+
+/**
+ * Equal-weight average of a Goal's non-archived Targets' progress, or `null`
+ * (not 0) when it has none yet — a Goal with zero (visible) Targets has no
+ * progress to report, not zero progress. Never stored; always derived, like
+ * every other aggregate in this file.
+ */
+export function getGoalProgress(goal: Goal, targets: Target[], tasks: Task[]): number | null {
+  const visible = getGoalTargets(targets, goal.id);
+  if (visible.length === 0) return null;
+  const sum = visible.reduce((acc, t) => acc + getTargetProgress(t, tasks), 0);
+  return clamp01(sum / visible.length / 100) * 100;
+}
+
 export function getDailyNoteForDate(notes: DailyNote[], date: string): DailyNote | undefined {
   return notes.find((n) => n.date === date);
 }
@@ -127,6 +220,23 @@ export type TaskUpdate = Partial<
   >
 >;
 
+/**
+ * Fields updatable on an existing Target via UPDATE_TARGET. `type` itself is
+ * fixed at creation (not editable) — only the fields valid for that target's
+ * own type have any effect; the reducer ignores fields that don't apply.
+ * `archived` is deliberately excluded here — see ARCHIVE_TARGET/RESTORE_TARGET.
+ */
+export type TargetUpdate = Partial<{
+  name: string;
+  startValue: number;
+  currentValue: number;
+  targetValue: number;
+  unit: string | undefined;
+  valueFormat: TargetValueFormat;
+  achieved: boolean;
+  taskIds: string[];
+}>;
+
 export type AppAction =
   | { type: 'LOAD'; data: AppData }
   | { type: 'ADD_TASK'; id?: string; title: string; status?: TaskStatus; notes?: string; priority?: Priority; projectId?: string; dueDate?: string }
@@ -149,6 +259,26 @@ export type AppAction =
       priorityRank?: number | null;
     }
   | { type: 'UPSERT_DAILY_NOTE'; id?: string; date: string; morning?: string; evening?: string }
+  | { type: 'ADD_GOAL'; id?: string; name: string; description?: string; dueDate?: string; priority?: Priority }
+  | {
+      type: 'UPDATE_GOAL';
+      id: string;
+      name?: string;
+      description?: string;
+      /** `undefined` leaves it unchanged; `null` clears it. */
+      dueDate?: string | null;
+      priority?: Priority;
+      status?: GoalStatus;
+    }
+  | { type: 'LINK_GOAL_PROJECT'; goalId: string; projectId: string }
+  | { type: 'UNLINK_GOAL_PROJECT'; goalId: string; projectId: string }
+  | { type: 'ADD_TARGET'; id?: string; goalId: string; targetType: 'numeric'; name: string; startValue: number; currentValue: number; targetValue: number; unit?: string; valueFormat?: TargetValueFormat }
+  | { type: 'ADD_TARGET'; id?: string; goalId: string; targetType: 'yesno'; name: string; achieved?: boolean }
+  | { type: 'ADD_TARGET'; id?: string; goalId: string; targetType: 'linked-tasks'; name: string; taskIds?: string[] }
+  | { type: 'UPDATE_TARGET'; id: string; updates: TargetUpdate }
+  | { type: 'ARCHIVE_TARGET'; id: string }
+  | { type: 'RESTORE_TARGET'; id: string }
+  | { type: 'REORDER_TARGET'; id: string; direction: 'up' | 'down' }
   | { type: 'IMPORT'; data: AppData }
   | { type: 'RESET' }
   /**
@@ -173,6 +303,27 @@ export function enforcePrimaryCap(tasks: Task[]): Task[] {
 
   const demoteIds = new Set(primaries.slice(3).map((t) => t.id));
   return tasks.map((t) => (demoteIds.has(t.id) ? { ...t, isPrimary: false } : t));
+}
+
+function applyTargetUpdate(target: Target, updates: TargetUpdate): Target {
+  const name = updates.name !== undefined ? updates.name.trim() : target.name;
+  if (name === '') return target;
+  const base = { ...target, name };
+  switch (base.type) {
+    case 'numeric':
+      return {
+        ...base,
+        startValue: updates.startValue ?? base.startValue,
+        currentValue: updates.currentValue ?? base.currentValue,
+        targetValue: updates.targetValue ?? base.targetValue,
+        unit: 'unit' in updates ? updates.unit : base.unit,
+        valueFormat: updates.valueFormat ?? base.valueFormat,
+      };
+    case 'yesno':
+      return { ...base, achieved: updates.achieved ?? base.achieved };
+    case 'linked-tasks':
+      return { ...base, taskIds: updates.taskIds ?? base.taskIds };
+  }
 }
 
 export function appReducer(state: AppData, action: AppAction): AppData {
@@ -382,11 +533,147 @@ export function appReducer(state: AppData, action: AppAction): AppData {
       return { ...state, dailyNotes: [...state.dailyNotes, note] };
     }
 
+    case 'ADD_GOAL': {
+      const name = action.name.trim();
+      if (!name) return state;
+      const goal: Goal = {
+        id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
+        name,
+        description: action.description?.trim() || undefined,
+        dueDate: action.dueDate || undefined,
+        priority: action.priority ?? 'Normal',
+        status: 'active',
+        projectIds: [],
+      };
+      return { ...state, goals: [...(state.goals ?? []), goal] };
+    }
+
+    case 'UPDATE_GOAL': {
+      const goals = state.goals ?? [];
+      return {
+        ...state,
+        goals: goals.map((g) =>
+          g.id === action.id
+            ? {
+                ...g,
+                ...(action.name !== undefined ? { name: action.name.trim() } : {}),
+                ...(action.description !== undefined
+                  ? { description: action.description.trim() || undefined }
+                  : {}),
+                ...(action.dueDate !== undefined
+                  ? { dueDate: action.dueDate === null ? undefined : action.dueDate }
+                  : {}),
+                ...(action.priority !== undefined ? { priority: action.priority } : {}),
+                ...(action.status !== undefined ? { status: action.status } : {}),
+              }
+            : g,
+        ),
+      };
+    }
+
+    case 'LINK_GOAL_PROJECT': {
+      const goals = state.goals ?? [];
+      return {
+        ...state,
+        goals: goals.map((g) =>
+          g.id === action.goalId && !g.projectIds.includes(action.projectId)
+            ? { ...g, projectIds: [...g.projectIds, action.projectId] }
+            : g,
+        ),
+      };
+    }
+
+    case 'UNLINK_GOAL_PROJECT': {
+      const goals = state.goals ?? [];
+      return {
+        ...state,
+        goals: goals.map((g) =>
+          g.id === action.goalId
+            ? { ...g, projectIds: g.projectIds.filter((id) => id !== action.projectId) }
+            : g,
+        ),
+      };
+    }
+
+    case 'ADD_TARGET': {
+      const name = action.name.trim();
+      if (!name) return state;
+      const targets = state.targets ?? [];
+      const base = {
+        id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
+        goalId: action.goalId,
+        name,
+        sortOrder: nextTargetSortOrder(targets, action.goalId),
+        archived: false,
+      };
+      let target: Target;
+      if (action.targetType === 'numeric') {
+        target = {
+          ...base,
+          type: 'numeric',
+          startValue: action.startValue,
+          currentValue: action.currentValue,
+          targetValue: action.targetValue,
+          unit: action.unit,
+          valueFormat: action.valueFormat ?? 'number',
+        };
+      } else if (action.targetType === 'yesno') {
+        target = { ...base, type: 'yesno', achieved: action.achieved ?? false };
+      } else {
+        target = { ...base, type: 'linked-tasks', taskIds: action.taskIds ?? [] };
+      }
+      return { ...state, targets: [...targets, target] };
+    }
+
+    case 'UPDATE_TARGET': {
+      const targets = state.targets ?? [];
+      return {
+        ...state,
+        targets: targets.map((t) => (t.id === action.id ? applyTargetUpdate(t, action.updates) : t)),
+      };
+    }
+
+    case 'ARCHIVE_TARGET': {
+      const targets = state.targets ?? [];
+      return {
+        ...state,
+        targets: targets.map((t) => (t.id === action.id ? { ...t, archived: true } : t)),
+      };
+    }
+
+    case 'RESTORE_TARGET': {
+      const targets = state.targets ?? [];
+      return {
+        ...state,
+        targets: targets.map((t) => (t.id === action.id ? { ...t, archived: false } : t)),
+      };
+    }
+
+    case 'REORDER_TARGET': {
+      const targets = state.targets ?? [];
+      const target = targets.find((t) => t.id === action.id);
+      if (!target || target.archived) return state;
+      const siblings = getGoalTargets(targets, target.goalId);
+      const idx = siblings.findIndex((t) => t.id === action.id);
+      const swapIdx = action.direction === 'up' ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= siblings.length) return state;
+
+      const other = siblings[swapIdx];
+      return {
+        ...state,
+        targets: targets.map((t) => {
+          if (t.id === target.id) return { ...t, sortOrder: other.sortOrder };
+          if (t.id === other.id) return { ...t, sortOrder: target.sortOrder };
+          return t;
+        }),
+      };
+    }
+
     case 'IMPORT':
       return action.data;
 
     case 'RESET':
-      return { version: 1, tasks: [], projects: [], dailyNotes: [] };
+      return { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] };
 
     case 'APPLY_REMOTE_UPDATE':
       return action.data;
