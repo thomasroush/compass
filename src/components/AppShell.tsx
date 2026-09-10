@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { to: '/goals', label: 'Goals' },
   { to: '/notes', label: 'Daily Notes' },
   { to: '/calendar', label: 'Calendar' },
+  { to: '/about', label: 'About' },
   { to: '/settings', label: 'Settings' },
 ];
 
