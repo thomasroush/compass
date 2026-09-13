@@ -236,6 +236,7 @@ export type TaskUpdate = Partial<
     | 'projectId'
     | 'priority'
     | 'dueDate'
+    | 'dueTime'
     | 'isPrimary'
     | 'archived'
     | 'sortOrder'
@@ -262,7 +263,7 @@ export type TargetUpdate = Partial<{
 
 export type AppAction =
   | { type: 'LOAD'; data: AppData }
-  | { type: 'ADD_TASK'; id?: string; title: string; status?: TaskStatus; notes?: string; priority?: Priority; projectId?: string; dueDate?: string }
+  | { type: 'ADD_TASK'; id?: string; title: string; status?: TaskStatus; notes?: string; priority?: Priority; projectId?: string; dueDate?: string; dueTime?: string }
   | { type: 'UPDATE_TASK'; id: string; updates: TaskUpdate }
   | { type: 'COMPLETE_TASK'; id: string }
   | { type: 'UNCOMPLETE_TASK'; id: string }
@@ -364,6 +365,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
         priority: action.priority ?? 'Normal',
         projectId: action.projectId || undefined,
         dueDate: action.dueDate || undefined,
+        dueTime: action.dueDate ? action.dueTime || undefined : undefined,
         createdAt: new Date().toISOString(),
         sortOrder: nextSortOrder(state.tasks, status),
         isPrimary: false,

@@ -1,5 +1,6 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, MouseEvent, useEffect, useState } from 'react';
 import { useApp } from '../store/useApp';
+import { downloadTaskIcs } from '../lib/ics';
 import { PRIORITIES, type Task, type TaskStatus } from '../types';
 import { StatusSelect } from './StatusSelect';
 
@@ -18,6 +19,7 @@ export function TaskForm({ task, onClose }: TaskFormProps) {
   const [priority, setPriority] = useState(task?.priority ?? 'Normal');
   const [projectId, setProjectId] = useState(task?.projectId ?? '');
   const [dueDate, setDueDate] = useState(task?.dueDate ?? '');
+  const [dueTime, setDueTime] = useState(task?.dueTime ?? '');
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -43,6 +45,7 @@ export function TaskForm({ task, onClose }: TaskFormProps) {
         priority,
         projectId: projectId || undefined,
         dueDate: dueDate || undefined,
+        dueTime: dueDate ? dueTime || undefined : undefined,
       });
     } else {
       dispatch({
@@ -55,10 +58,18 @@ export function TaskForm({ task, onClose }: TaskFormProps) {
           priority,
           projectId: projectId || undefined,
           dueDate: dueDate || undefined,
+          dueTime: dueDate ? dueTime || undefined : undefined,
         },
       });
     }
     onClose();
+  }
+
+  function handleAddToCalendar(e: MouseEvent) {
+    e.preventDefault();
+    if (!task?.dueDate) return;
+    const projectName = state.projects.find((p) => p.id === task.projectId)?.name;
+    downloadTaskIcs(task, { projectName });
   }
 
   return (
@@ -127,17 +138,39 @@ export function TaskForm({ task, onClose }: TaskFormProps) {
             </select>
           </div>
 
-          <div className="field">
-            <label htmlFor="task-due">Due date</label>
-            <input
-              id="task-due"
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-            />
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="task-due">Due date</label>
+              <input
+                id="task-due"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="task-due-time">Time (optional)</label>
+              <input
+                id="task-due-time"
+                type="time"
+                value={dueTime}
+                onChange={(e) => setDueTime(e.target.value)}
+                disabled={!dueDate}
+              />
+            </div>
           </div>
 
           <div className="dialog-actions">
+            {!isNew && task.dueDate && (
+              <button
+                type="button"
+                className="secondary calendar-export-btn"
+                onClick={handleAddToCalendar}
+              >
+                Add to Calendar
+              </button>
+            )}
             <button type="button" className="secondary" onClick={onClose}>
               Cancel
             </button>

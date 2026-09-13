@@ -722,8 +722,16 @@ a:focus-visible {
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+/* Pushes the calendar-export button to the opposite end of .dialog-actions
+   from Cancel/Save, without changing that shared rule's flex-end alignment
+   for every other dialog that uses it. */
+.calendar-export-btn {
+  margin-right: auto;
 }
 
 .stack-form {

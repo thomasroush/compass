@@ -91,6 +91,7 @@ export interface TaskRow {
   project_id: string | null;
   priority: Priority;
   due_date: string | null;
+  due_time: string | null;
   created_at: string;
   completed_at: string | null;
   sort_order: number;
@@ -108,6 +109,9 @@ export function taskFromRow(row: TaskRow): CloudTask {
     projectId: row.project_id ?? undefined,
     priority: row.priority,
     dueDate: row.due_date ?? undefined,
+    // Postgres `time` columns round-trip through supabase-js as "HH:MM:SS";
+    // the app (and the HTML time input) only ever works with "HH:MM".
+    dueTime: row.due_time ? row.due_time.slice(0, 5) : undefined,
     createdAt: row.created_at,
     completedAt: row.completed_at ?? undefined,
     sortOrder: row.sort_order,
@@ -126,6 +130,7 @@ export interface TaskInsertRow {
   project_id: string | null;
   priority: Priority;
   due_date: string | null;
+  due_time: string | null;
   created_at: string;
   completed_at: string | null;
   sort_order: number;
@@ -143,6 +148,7 @@ export function taskToInsertRow(userId: string, task: Task): TaskInsertRow {
     project_id: task.projectId ?? null,
     priority: task.priority,
     due_date: task.dueDate ?? null,
+    due_time: task.dueDate ? task.dueTime ?? null : null,
     created_at: task.createdAt,
     completed_at: task.completedAt ?? null,
     sort_order: task.sortOrder,
@@ -158,6 +164,7 @@ export interface TaskUpdateRow {
   project_id?: string | null;
   priority?: Priority;
   due_date?: string | null;
+  due_time?: string | null;
   completed_at?: string | null;
   sort_order?: number;
   is_primary?: boolean;
@@ -176,6 +183,11 @@ export function taskUpdatesToRow(updates: Partial<Omit<Task, 'id' | 'createdAt'>
   if ('projectId' in updates) row.project_id = updates.projectId ?? null;
   if ('priority' in updates) row.priority = updates.priority;
   if ('dueDate' in updates) row.due_date = updates.dueDate ?? null;
+  // dueTime only makes sense alongside a due date; clearing dueDate (without
+  // an explicit dueTime in the same update) also clears dueTime, so a task
+  // can never end up with a stored time but no date.
+  if ('dueTime' in updates) row.due_time = updates.dueTime ?? null;
+  else if ('dueDate' in updates && !updates.dueDate) row.due_time = null;
   if ('completedAt' in updates) row.completed_at = updates.completedAt ?? null;
   if ('sortOrder' in updates) row.sort_order = updates.sortOrder;
   if ('isPrimary' in updates) row.is_primary = updates.isPrimary;

@@ -23,6 +23,8 @@ export interface Task {
   projectId?: string;
   priority: Priority;
   dueDate?: string;
+  /** Optional time-of-day for `dueDate`, as "HH:MM" (24-hour, local/floating — no timezone). Ignored if `dueDate` is unset. */
+  dueTime?: string;
   createdAt: string;
   completedAt?: string;
   sortOrder: number;

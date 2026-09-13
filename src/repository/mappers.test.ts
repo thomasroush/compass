@@ -101,6 +101,7 @@ describe('task mapping', () => {
       project_id: 'p1',
       priority: 'High',
       due_date: '2026-09-01',
+      due_time: '14:30:00',
       created_at: '2026-08-30T00:00:00.000Z',
       completed_at: null,
       sort_order: 2,
@@ -116,6 +117,7 @@ describe('task mapping', () => {
       projectId: 'p1',
       priority: 'High',
       dueDate: '2026-09-01',
+      dueTime: '14:30',
       createdAt: '2026-08-30T00:00:00.000Z',
       completedAt: undefined,
       sortOrder: 2,
@@ -134,6 +136,7 @@ describe('task mapping', () => {
       project_id: null,
       priority: 'Normal',
       due_date: null,
+      due_time: null,
       created_at: 'ts',
       completed_at: null,
       sort_order: 0,
@@ -144,6 +147,7 @@ describe('task mapping', () => {
     expect(cloud.notes).toBeUndefined();
     expect(cloud.projectId).toBeUndefined();
     expect(cloud.dueDate).toBeUndefined();
+    expect(cloud.dueTime).toBeUndefined();
     expect(cloud.completedAt).toBeUndefined();
   });
 
@@ -167,6 +171,7 @@ describe('task mapping', () => {
       project_id: null,
       priority: 'Normal',
       due_date: null,
+      due_time: null,
       created_at: '2026-08-30T00:00:00.000Z',
       completed_at: null,
       sort_order: 0,
@@ -188,7 +193,18 @@ describe('task mapping', () => {
     // omitting the key entirely (the case above) means "leave project_id unchanged".
     expect(taskUpdatesToRow({ projectId: undefined })).toEqual({ project_id: null });
     expect(taskUpdatesToRow({ notes: undefined })).toEqual({ notes: null });
-    expect(taskUpdatesToRow({ dueDate: undefined })).toEqual({ due_date: null });
+    expect(taskUpdatesToRow({ dueTime: undefined })).toEqual({ due_time: null });
+  });
+
+  it('clears dueTime along with dueDate when dueDate is cleared without an explicit dueTime', () => {
+    expect(taskUpdatesToRow({ dueDate: undefined })).toEqual({ due_date: null, due_time: null });
+  });
+
+  it('lets an explicit dueTime override the dueDate-clears-dueTime default in the same update', () => {
+    expect(taskUpdatesToRow({ dueDate: '2026-09-20', dueTime: '09:00' })).toEqual({
+      due_date: '2026-09-20',
+      due_time: '09:00',
+    });
   });
 });
 

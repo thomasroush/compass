@@ -57,6 +57,7 @@ function validateTask(value: unknown): Task | null {
   if (!isOptionalString(t.notes)) return null;
   if (t.projectId !== undefined && !isString(t.projectId)) return null;
   if (t.dueDate !== undefined && !isString(t.dueDate)) return null;
+  if (t.dueTime !== undefined && !isString(t.dueTime)) return null;
   if (t.completedAt !== undefined && !isString(t.completedAt)) return null;
 
   return {
@@ -67,6 +68,7 @@ function validateTask(value: unknown): Task | null {
     projectId: t.projectId,
     priority: t.priority as Task['priority'],
     dueDate: t.dueDate,
+    dueTime: t.dueTime,
     createdAt: t.createdAt,
     completedAt: t.completedAt,
     sortOrder: t.sortOrder,

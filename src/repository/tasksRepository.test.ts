@@ -186,6 +186,7 @@ describe('createTask', () => {
       project_id: null,
       priority: 'Normal',
       due_date: null,
+      due_time: null,
       created_at: '2026-08-30T00:00:00.000Z',
       completed_at: null,
       sort_order: 0,
