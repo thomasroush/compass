@@ -15,8 +15,13 @@
   --accent-soft: #e2f0ee;
   --danger: #b91c1c;
   --danger-hover: #991b1b;
+  --danger-soft: #fef2f2;
+  --danger-soft-border: #fecaca;
+  --danger-soft-hover: #fee2e2;
   --sidebar-width: 220px;
   --focus: #0f6f66;
+  --radius-btn: 10px;
+  --radius-nav: 8px;
 
   /* Board status accents */
   --status-inbox: #64748b;
@@ -59,40 +64,98 @@ textarea {
   font: inherit;
 }
 
+/*
+ * Button system: four consistent tiers, all sharing the same shape/sizing
+ * rules and differing only in color treatment.
+ *   - primary (bare <button>, no modifier class): the default — solid accent
+ *     fill, used for the main action in a given context.
+ *   - .secondary: light surface, thin border, dark text — for the next-most
+ *     prominent action alongside a primary (e.g. Cancel next to Save).
+ *   - .ghost: no fill or border, text-only until interacted with — for the
+ *     lowest-emphasis actions. Not yet used by any component, but defined
+ *     here so the app has a complete, ready-to-use set of four tiers.
+ *   - .danger: destructive actions. Deliberately a soft tint rather than a
+ *     solid red fill — identifiable without being alarming for actions that
+ *     aren't catastrophic (e.g. "Reset", "Archive").
+ */
 button {
   cursor: pointer;
-  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-btn);
+  padding: 0.6rem 1.1rem;
+  min-height: 44px;
+  font-weight: 600;
   background: var(--accent);
   color: #fff;
-  padding: 0.45rem 0.85rem;
-  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(15, 111, 102, 0.25);
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-button:hover {
+button:not(:disabled):hover {
   background: var(--accent-hover);
+}
+
+button:not(:disabled):active {
+  background: var(--accent-hover);
+  box-shadow: 0 1px 1px rgba(15, 111, 102, 0.3) inset;
 }
 
 button.secondary {
   background: var(--surface);
   color: var(--text);
+  border-color: var(--border);
+  box-shadow: none;
 }
 
-button.secondary:hover {
-  background: #f5f5f4;
+button.secondary:not(:disabled):hover {
+  background: var(--bg);
+  border-color: #c9c0ae;
+}
+
+button.secondary:not(:disabled):active {
+  background: #efece4;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: transparent;
+  box-shadow: none;
+  font-weight: 500;
+}
+
+button.ghost:not(:disabled):hover {
+  background: var(--bg);
+}
+
+button.ghost:not(:disabled):active {
+  background: #efece4;
 }
 
 button.danger {
-  background: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger-soft-border);
+  box-shadow: none;
+}
+
+button.danger:not(:disabled):hover {
+  background: var(--danger-soft-hover);
   border-color: var(--danger);
 }
 
-button.danger:hover {
-  background: var(--danger-hover);
+button.danger:not(:disabled):active {
+  background: var(--danger-soft-border);
 }
 
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 /* Excludes checkbox/radio: without this, the bare `input` selector below
@@ -163,15 +226,19 @@ a:focus-visible {
 }
 
 .nav-link {
-  display: block;
-  padding: 0.5rem 0.75rem;
-  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius-nav);
   text-decoration: none;
   color: var(--text);
+  font-weight: 500;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .nav-link:hover {
-  background: #f5f5f4;
+  background: var(--bg);
 }
 
 .nav-link.active {
@@ -904,12 +971,19 @@ code {
     width: 100%;
   }
 
+  /* Touch targets need more headroom than desktop's mouse-driven 44px. */
+  button {
+    min-height: 48px;
+  }
+
   .mobile-nav {
     display: flex;
+    gap: 0.25rem;
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
+    padding: 0.35rem 0.4rem;
     background: var(--surface);
     border-top: 1px solid var(--border);
     overflow-x: auto;
@@ -919,19 +993,29 @@ code {
   .mobile-nav-link {
     flex: 1;
     min-width: 4.5rem;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     text-align: center;
-    padding: 0.55rem 0.35rem;
+    padding: 0.5rem 0.35rem;
+    border-radius: var(--radius-nav);
     font-size: 0.7rem;
     text-decoration: none;
     color: var(--muted);
     white-space: nowrap;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  .mobile-nav-link:hover {
+    background: var(--bg);
+    color: var(--text);
   }
 
   .mobile-nav-link.active {
     color: var(--accent);
     font-weight: 600;
     background: var(--accent-soft);
-    box-shadow: inset 0 3px 0 0 var(--accent);
   }
 
   .board-row {
@@ -970,6 +1054,29 @@ code {
 
   .copy-ai-actions button {
     width: 100%;
+  }
+}
+
+/* Narrow phones: dialog and settings action rows stack full-width instead of
+   cramming multiple buttons onto one line. Scoped tighter than the 768px
+   breakpoint above since a ~420-520px dialog still has room to keep buttons
+   side by side on a tablet-width screen — it's only truly narrow phones
+   where two or three buttons next to each other get cramped. */
+@media (max-width: 480px) {
+  .dialog-actions,
+  .settings-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dialog-actions button,
+  .settings-actions button,
+  form.stack-form button[type='submit'] {
+    width: 100%;
+  }
+
+  .calendar-export-btn {
+    margin-right: 0;
   }
 }
 
