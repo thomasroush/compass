@@ -1,10 +1,10 @@
-import { listDailyNotes } from '../repository/dailyNotesRepository';
+import { listQuickNotes } from '../repository/quickNotesRepository';
 import { listGoals } from '../repository/goalsRepository';
 import { listProjects } from '../repository/projectsRepository';
 import { listTargets } from '../repository/targetsRepository';
 import { listTasks } from '../repository/tasksRepository';
 import type { RepositoryResult } from '../repository/types';
-import type { AppData, DailyNote, Goal, Project, Target, Task } from '../types';
+import type { AppData, QuickNote, Goal, Project, Target, Task } from '../types';
 import {
   clearDirty,
   getRecordUpdatedAt,
@@ -51,6 +51,14 @@ export interface RefreshOutcome {
   changed: boolean;
   appData: AppData;
   metadata: AccountSyncMetadata;
+  /**
+   * Set when Quick Notes specifically could not be read, even though the
+   * refresh otherwise succeeded. A Quick Notes outage must never fail the
+   * whole refresh — see this module's doc comment and hydrateFromCloud.ts's
+   * matching `quickNotesError` field. Local Quick Notes are left exactly as
+   * they were when this happens.
+   */
+  quickNotesError?: string;
 }
 
 export type RefreshFailure = { ok: false; message: string };
@@ -94,22 +102,27 @@ export async function refreshFromCloud(
   metadata: AccountSyncMetadata,
   acceptConflicts = false,
 ): Promise<RefreshOutcome | RefreshFailure> {
-  const [projectsResult, tasksResult, notesResult, goalsResult, targetsResult] = await Promise.all([
+  // Quick Notes is read independently of the other four entities — a Quick
+  // Notes-specific outage must never fail this whole refresh (which would
+  // otherwise silently stop projects/tasks/goals/targets from ever pulling
+  // down changes made on another device, for as long as the outage lasts).
+  // Failures in the other four remain hard failures, exactly as before.
+  const [projectsResult, tasksResult, goalsResult, targetsResult, notesResult] = await Promise.all([
     listProjects(),
     listTasks(),
-    listDailyNotes(),
     listGoals(),
     listTargets(),
+    listQuickNotes(),
   ]);
 
-  const failed = [projectsResult, tasksResult, notesResult, goalsResult, targetsResult].find(
+  const failed = [projectsResult, tasksResult, goalsResult, targetsResult].find(
     (r): r is RepositoryResult<never> & { ok: false } => !r.ok,
   );
   if (failed) {
     return { ok: false, message: failed.error.message };
   }
   // Narrowed by the check above, but TS doesn't carry that through the array find.
-  if (!projectsResult.ok || !tasksResult.ok || !notesResult.ok || !goalsResult.ok || !targetsResult.ok) {
+  if (!projectsResult.ok || !tasksResult.ok || !goalsResult.ok || !targetsResult.ok) {
     return { ok: false, message: 'Could not read your account data.' };
   }
 
@@ -129,19 +142,11 @@ export async function refreshFromCloud(
     metadata.dirty.task,
     acceptConflicts,
   );
-  const dailyNotes = refreshEntity<DailyNote, (typeof notesResult.data)[number]>(
-    'dailyNote',
-    local.dailyNotes,
-    notesResult.data,
-    tasks.metadata,
-    metadata.dirty.dailyNote,
-    acceptConflicts,
-  );
   const goals = refreshEntity<Goal, (typeof goalsResult.data)[number]>(
     'goal',
     local.goals,
     goalsResult.data,
-    dailyNotes.metadata,
+    tasks.metadata,
     metadata.dirty.goal,
     acceptConflicts,
   );
@@ -154,17 +159,33 @@ export async function refreshFromCloud(
     acceptConflicts,
   );
 
+  // Only refreshed when the read actually succeeded — on failure, Quick
+  // Notes are left exactly as they are locally (not cleared, not touched),
+  // and the failure is reported via `quickNotesError` rather than aborting
+  // the projects/tasks/goals/targets refresh above.
+  const quickNotes = notesResult.ok
+    ? refreshEntity<QuickNote, (typeof notesResult.data)[number]>(
+        'quickNote',
+        local.quickNotes,
+        notesResult.data,
+        targets.metadata,
+        metadata.dirty.quickNote,
+        acceptConflicts,
+      )
+    : { records: local.quickNotes, metadata: targets.metadata, changed: false };
+
   return {
     ok: true,
-    changed: projects.changed || tasks.changed || dailyNotes.changed || goals.changed || targets.changed,
+    changed: projects.changed || tasks.changed || goals.changed || targets.changed || quickNotes.changed,
     appData: {
       ...local,
       projects: projects.records,
       tasks: tasks.records,
-      dailyNotes: dailyNotes.records,
+      quickNotes: quickNotes.records,
       goals: goals.records,
       targets: targets.records,
     },
-    metadata: targets.metadata,
+    metadata: quickNotes.metadata,
+    quickNotesError: notesResult.ok ? undefined : notesResult.error.message,
   };
 }

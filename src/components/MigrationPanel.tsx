@@ -19,7 +19,7 @@ function CountsRow({ label, counts }: { label: string; counts: MigrationCounts }
       <span className="migration-counts-label">{label}</span>
       <span>{counts.projects} projects</span>
       <span>{counts.tasks} tasks</span>
-      <span>{counts.dailyNotes} daily notes</span>
+      <span>{counts.quickNotes} quick notes</span>
     </div>
   );
 }
@@ -48,7 +48,7 @@ export function MigrationPanel() {
     return (
       <section className="section settings-section">
         <h2>Move this device&rsquo;s data to your account</h2>
-        <p>Sign in above to copy the tasks, projects, and daily notes stored in this browser to your account.</p>
+        <p>Sign in above to copy the tasks, projects, and quick notes stored in this browser to your account.</p>
       </section>
     );
   }
@@ -107,7 +107,7 @@ export function MigrationPanel() {
       <h2>Move this device&rsquo;s data to your account</h2>
       <p className="section-help">
         Signed in as <strong>{auth.user.email}</strong>. This copies the tasks, projects, and
-        daily notes currently stored in this browser to your Supabase account. Nothing on this
+        quick notes currently stored in this browser to your Supabase account. Nothing on this
         device is deleted or changed, and nothing is uploaded until you confirm.
       </p>
 
@@ -174,7 +174,7 @@ export function MigrationPanel() {
             <>
               <p className={outcome.ok ? 'message' : 'message error'} role="status">
                 {outcome.ok
-                  ? `Migration complete and verified: ${outcome.uploaded.projects} projects, ${outcome.uploaded.tasks} tasks, and ${outcome.uploaded.dailyNotes} daily notes were copied to your account.`
+                  ? `Migration complete and verified: ${outcome.uploaded.projects} projects, ${outcome.uploaded.tasks} tasks, and ${outcome.uploaded.quickNotes} quick notes were copied to your account.`
                   : 'Migration finished with problems. Do not assume your data is fully in the cloud — see details below.'}
               </p>
 
@@ -207,7 +207,7 @@ export function MigrationPanel() {
                 <p>
                   Verified against your account: {outcome.verification.cloudCountsAfter.projects}{' '}
                   projects, {outcome.verification.cloudCountsAfter.tasks} tasks,{' '}
-                  {outcome.verification.cloudCountsAfter.dailyNotes} daily notes now in the cloud.
+                  {outcome.verification.cloudCountsAfter.quickNotes} quick notes now in the cloud.
                 </p>
               )}
 

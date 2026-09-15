@@ -1,5 +1,6 @@
 import {
   formatTargetValue,
+  getActiveQuickNotes,
   getGoalProgress,
   getGoalTargets,
   getProjectGoals,
@@ -8,7 +9,7 @@ import {
   getTasksByStatus,
   sortProjectsByPriority,
 } from '../store/reducer';
-import type { Goal, Priority, Project, Target, Task } from '../types';
+import type { Goal, Priority, Project, QuickNote, Target, Task } from '../types';
 
 export type CopyToAIScope =
   | { type: 'current-work' }
@@ -182,15 +183,36 @@ function pushActiveGoalSections(
   return activeGoals.length > 0;
 }
 
+/**
+ * One line per active (unfinished, not deleted) Quick Note — never completed
+ * ones, per requirement 12: the snapshot must reflect what the user still
+ * needs to see, not a history of what they've already handled. Shared by the
+ * 'today' and 'current-work' scopes; Quick Notes have no project, so the
+ * 'project' scope never shows them.
+ */
+function pushQuickNotesSection(lines: string[], quickNotes: QuickNote[]): boolean {
+  const active = getActiveQuickNotes(quickNotes);
+  if (active.length === 0) return false;
+  lines.push('## Quick Notes', '');
+  for (const note of active) lines.push(`- ${note.text}`);
+  lines.push('');
+  return true;
+}
+
 function buildCurrentWorkBody(
   lines: string[],
   projects: Project[],
   tasks: Task[],
   goals: Goal[],
   targets: Target[],
+  quickNotes: QuickNote[],
 ): void {
   const activeProjects = sortProjectsByPriority(projects.filter((p) => p.status === 'active'));
   let hasContent = false;
+
+  if (pushQuickNotesSection(lines, quickNotes)) {
+    hasContent = true;
+  }
 
   for (const project of activeProjects) {
     const projectTasks = tasks
@@ -221,7 +243,8 @@ function buildCurrentWorkBody(
   }
 }
 
-function buildTodayBody(lines: string[], projects: Project[], tasks: Task[]): void {
+function buildTodayBody(lines: string[], projects: Project[], tasks: Task[], quickNotes: QuickNote[]): void {
+  pushQuickNotesSection(lines, quickNotes);
   const todayTasks = getTasksByStatus(tasks, 'Today');
   lines.push("## Today's tasks", '');
   if (todayTasks.length === 0) {
@@ -263,17 +286,21 @@ function buildProjectBody(
 
 /**
  * Pure, deterministic snapshot formatter for the "Copy to AI" feature.
- * Given the same projects/tasks/goals/targets/scope/generatedAt, always
- * produces the same string. Never includes IDs, timestamps used only for
- * sync, or any field beyond what the current Compass data model already
+ * Given the same projects/tasks/goals/targets/quickNotes/scope/generatedAt,
+ * always produces the same string. Never includes IDs, timestamps used only
+ * for sync, or any field beyond what the current Compass data model already
  * displays. Today's scope is deliberately never given goals/targets —
- * buildTodayBody's signature and behavior are unchanged.
+ * buildTodayBody's signature and behavior for those is unchanged. Only
+ * active (unfinished, not deleted) Quick Notes are ever included — see
+ * pushQuickNotesSection — and never for the 'project' scope, since Quick
+ * Notes have no project of their own.
  */
 export function buildAISnapshot(
   projects: Project[],
   tasks: Task[],
   goals: Goal[],
   targets: Target[],
+  quickNotes: QuickNote[],
   scope: CopyToAIScope,
   generatedAt: Date,
 ): string {
@@ -290,11 +317,11 @@ export function buildAISnapshot(
   ];
 
   if (scope.type === 'today') {
-    buildTodayBody(lines, projects, tasks);
+    buildTodayBody(lines, projects, tasks, quickNotes);
   } else if (scope.type === 'project') {
     buildProjectBody(lines, projects, tasks, goals, targets, scope.projectId);
   } else {
-    buildCurrentWorkBody(lines, projects, tasks, goals, targets);
+    buildCurrentWorkBody(lines, projects, tasks, goals, targets, quickNotes);
   }
 
   return lines.join('\n').trim() + '\n';

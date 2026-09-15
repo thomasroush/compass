@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   appState: {
     // Raw literal, not createEmptyAppData() — see GoalsView.test.tsx's note
     // on why calling an imported function inside vi.hoisted() is unsafe.
-    current: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] } as AppData,
+    current: { version: 1, tasks: [], projects: [], quickNotes: [], goals: [], targets: [] } as AppData,
     dispatch: vi.fn(),
   },
 }));
@@ -85,7 +85,7 @@ function renderView(goalId = 'g1') {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.appState.current = { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] };
+  mocks.appState.current = { version: 1, tasks: [], projects: [], quickNotes: [], goals: [], targets: [] };
 });
 
 afterEach(() => {

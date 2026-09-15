@@ -4,6 +4,7 @@ import {
   getTodayOtherTasks,
   getTodayPrimaryTasks,
 } from '../store/reducer';
+import { QuickNotesSection } from '../components/QuickNotesSection';
 import { TaskRow } from '../components/TaskRow';
 import { todayDateString } from '../types';
 
@@ -21,6 +22,8 @@ export function TodayView() {
         <h1>Today</h1>
         <p className="subtitle">{today}</p>
       </header>
+
+      <QuickNotesSection />
 
       <section className="section">
         <h2>Primary tasks</h2>

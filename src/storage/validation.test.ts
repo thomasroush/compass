@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { validateAppData } from './validation';
 
-const BASE = { version: 1, tasks: [], projects: [], dailyNotes: [] };
+const BASE = { version: 1, tasks: [], projects: [], quickNotes: [] };
 
 const validGoal = {
   id: 'g1',
@@ -70,6 +70,101 @@ describe('validateAppData — backward compatibility', () => {
   it('rejects targets present but not an array', () => {
     const result = validateAppData({ ...BASE, goals: [], targets: 'nope' });
     expect(result).toEqual({ ok: false, error: 'Targets must be an array.' });
+  });
+});
+
+const validQuickNote = {
+  id: 'n1',
+  text: 'Buy underwear',
+  completed: false,
+  deleted: false,
+  createdAt: '2026-08-30T00:00:00.000Z',
+};
+
+describe('validateAppData — quick note shape', () => {
+  it('accepts a fully valid quick note, including completedAt', () => {
+    const note = { ...validQuickNote, completed: true, completedAt: '2026-08-31T00:00:00.000Z' };
+    const result = validateAppData({ ...BASE, quickNotes: [note] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.quickNotes[0]).toEqual(note);
+  });
+
+  it('rejects a quick note missing required boolean fields', () => {
+    const { completed: _drop, ...incomplete } = validQuickNote;
+    void _drop;
+    const result = validateAppData({ ...BASE, quickNotes: [incomplete] });
+    expect(result).toEqual({ ok: false, error: 'Invalid quick note at index 0.' });
+  });
+
+  it('rejects duplicate quick note ids', () => {
+    const result = validateAppData({ ...BASE, quickNotes: [validQuickNote, validQuickNote] });
+    expect(result).toEqual({ ok: false, error: 'Duplicate quick note id: n1.' });
+  });
+
+  it('rejects quickNotes present but not an array', () => {
+    const result = validateAppData({ ...BASE, quickNotes: 'nope' });
+    expect(result).toEqual({ ok: false, error: 'Quick notes must be an array.' });
+  });
+});
+
+describe('validateAppData — legacy Daily Notes migration', () => {
+  it('converts an old-shape dailyNotes record (no quickNotes key present) into a Quick Note', () => {
+    const legacy = {
+      version: 1,
+      tasks: [],
+      projects: [],
+      dailyNotes: [{ id: 'old-1', date: '2026-08-30', morning: 'Plan day', evening: 'Review' }],
+    };
+    const result = validateAppData(legacy);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.quickNotes).toHaveLength(1);
+    expect(result.data.quickNotes[0].text).toBe('Morning: Plan day / Evening: Review');
+    expect(result.data.quickNotes[0].completed).toBe(false);
+    expect(result.data.quickNotes[0].deleted).toBe(false);
+    // A fresh id is generated rather than reusing the old daily-note id, since
+    // the two tables/shapes are unrelated.
+    expect(result.data.quickNotes[0].id).not.toBe('old-1');
+  });
+
+  it('drops a blank legacy daily note (both morning and evening empty) rather than creating an empty Quick Note', () => {
+    const legacy = {
+      version: 1,
+      tasks: [],
+      projects: [],
+      dailyNotes: [{ id: 'old-1', date: '2026-08-31', morning: '', evening: '   ' }],
+    };
+    const result = validateAppData(legacy);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.quickNotes).toHaveLength(0);
+  });
+
+  it('migrates a legacy note with only one field filled in', () => {
+    const legacy = {
+      version: 1,
+      tasks: [],
+      projects: [],
+      dailyNotes: [{ id: 'old-1', date: '2026-08-31', morning: 'Went for a run', evening: '' }],
+    };
+    const result = validateAppData(legacy);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.quickNotes[0].text).toBe('Morning: Went for a run');
+  });
+
+  it('never consults the legacy dailyNotes key once quickNotes is present', () => {
+    const mixed = {
+      version: 1,
+      tasks: [],
+      projects: [],
+      quickNotes: [],
+      dailyNotes: [{ id: 'old-1', date: '2026-08-31', morning: 'Should be ignored', evening: '' }],
+    };
+    const result = validateAppData(mixed);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.quickNotes).toHaveLength(0);
   });
 });
 

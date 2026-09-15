@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import App from './App';
 
 /**
@@ -69,7 +69,7 @@ describe('AuthGate — signed out (Supabase configured)', () => {
     expect(screen.queryByText('Today')).toBeNull();
     expect(screen.queryByText('Board')).toBeNull();
     expect(screen.queryByText('Projects')).toBeNull();
-    expect(screen.queryByText('Daily Notes')).toBeNull();
+    expect(screen.queryByText('Calendar')).toBeNull();
     expect(screen.queryByText('Settings')).toBeNull();
   });
 
@@ -103,6 +103,22 @@ describe('AuthGate — signed in (Supabase configured)', () => {
 
     expect(screen.getByTestId('linking-choice')).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Today' })).toBeNull();
+  });
+
+  it('clicking the Tasks nav link actually navigates to the Tasks view (regression: a Quick Notes cloud error must never block routing)', () => {
+    authState.status = 'ready';
+    authState.user = { id: 'user-1', email: 'person@example.com' };
+    cloudSyncState.status = 'idle';
+    render(<App />);
+
+    // Today's content is showing by default.
+    expect(screen.getByText('Primary tasks')).toBeTruthy();
+    expect(screen.queryByText(/Untriaged inbox/)).toBeNull();
+
+    fireEvent.click(screen.getAllByRole('link', { name: 'Tasks' })[0]);
+
+    expect(screen.getByText(/Untriaged inbox/)).toBeTruthy();
+    expect(screen.queryByText('Primary tasks')).toBeNull();
   });
 
   it('returns to the login screen immediately after sign-out', () => {

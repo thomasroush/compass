@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { AppData, DailyNote, Project, Task } from '../types';
+import type { AppData, QuickNote, Project, Task } from '../types';
 import { createEmptyAppData } from '../types';
-import type { CloudDailyNote, CloudProject, CloudTask, RepositoryResult } from './types';
+import type { CloudQuickNote, CloudProject, CloudTask, RepositoryResult } from './types';
 
 const projectsRepo = vi.hoisted(() => ({
   listProjects: vi.fn(),
@@ -11,14 +11,14 @@ const tasksRepo = vi.hoisted(() => ({
   listTasks: vi.fn(),
   upsertTask: vi.fn(),
 }));
-const dailyNotesRepo = vi.hoisted(() => ({
-  listDailyNotes: vi.fn(),
-  upsertDailyNote: vi.fn(),
+const quickNotesRepo = vi.hoisted(() => ({
+  listQuickNotes: vi.fn(),
+  upsertQuickNote: vi.fn(),
 }));
 
 vi.mock('./projectsRepository', () => projectsRepo);
 vi.mock('./tasksRepository', () => tasksRepo);
-vi.mock('./dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('./quickNotesRepository', () => quickNotesRepo);
 
 import { countLocalData, getCloudCounts, runMigration } from './migration';
 
@@ -46,10 +46,16 @@ const task: Task = {
   isPrimary: false,
   archived: false,
 };
-const note: DailyNote = { id: 'note-stable-1', date: '2026-08-30', morning: 'Plan', evening: 'Review' };
+const note: QuickNote = {
+  id: 'note-stable-1',
+  text: 'Buy underwear',
+  completed: false,
+  deleted: false,
+  createdAt: '2026-08-30T00:00:00.000Z',
+};
 
 function localData(overrides: Partial<AppData> = {}): AppData {
-  return { ...createEmptyAppData(), projects: [project], tasks: [task], dailyNotes: [note], ...overrides };
+  return { ...createEmptyAppData(), projects: [project], tasks: [task], quickNotes: [note], ...overrides };
 }
 
 function cloudProject(p: Project = project): CloudProject {
@@ -58,7 +64,7 @@ function cloudProject(p: Project = project): CloudProject {
 function cloudTask(t: Task = task): CloudTask {
   return { ...t, updatedAt: 'ts' };
 }
-function cloudNote(n: DailyNote = note): CloudDailyNote {
+function cloudNote(n: QuickNote = note): CloudQuickNote {
   return { ...n, updatedAt: 'ts' };
 }
 
@@ -69,8 +75,8 @@ beforeEach(() => {
 describe('countLocalData', () => {
   it('counts each entity independently', () => {
     const data = localData();
-    expect(countLocalData(data)).toEqual({ projects: 1, tasks: 1, dailyNotes: 1 });
-    expect(countLocalData(createEmptyAppData())).toEqual({ projects: 0, tasks: 0, dailyNotes: 0 });
+    expect(countLocalData(data)).toEqual({ projects: 1, tasks: 1, quickNotes: 1 });
+    expect(countLocalData(createEmptyAppData())).toEqual({ projects: 0, tasks: 0, quickNotes: 0 });
   });
 });
 
@@ -78,16 +84,16 @@ describe('getCloudCounts', () => {
   it('returns current cloud counts when authenticated', async () => {
     projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
     tasksRepo.listTasks.mockResolvedValue(ok([]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
 
     const result = await getCloudCounts();
-    expect(result).toEqual({ ok: true, data: { projects: 1, tasks: 0, dailyNotes: 0 } });
+    expect(result).toEqual({ ok: true, data: { projects: 1, tasks: 0, quickNotes: 0 } });
   });
 
   it('fails without authentication, so the migration preview cannot be shown', async () => {
     projectsRepo.listProjects.mockResolvedValue(err('unauthenticated', 'You must be signed in to access cloud data.'));
     tasksRepo.listTasks.mockResolvedValue(ok([]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
 
     const result = await getCloudCounts();
     expect(result.ok).toBe(false);
@@ -103,11 +109,11 @@ describe('runMigration — authentication requirement', () => {
 
     expect(outcome.ok).toBe(false);
     expect(outcome.authError).toBe('You must be signed in to access cloud data.');
-    expect(outcome.uploaded).toEqual({ projects: 0, tasks: 0, dailyNotes: 0 });
+    expect(outcome.uploaded).toEqual({ projects: 0, tasks: 0, quickNotes: 0 });
     // Tasks/notes must never be attempted once authentication fails, and no
     // verification re-read happens either.
     expect(tasksRepo.upsertTask).not.toHaveBeenCalled();
-    expect(dailyNotesRepo.upsertDailyNote).not.toHaveBeenCalled();
+    expect(quickNotesRepo.upsertQuickNote).not.toHaveBeenCalled();
     expect(projectsRepo.listProjects).not.toHaveBeenCalled();
   });
 });
@@ -116,16 +122,16 @@ describe('runMigration — account-affinity pinning', () => {
   it('passes the caller-supplied, already-authenticated account id to every upsert call — never a value derived from the records', async () => {
     projectsRepo.upsertProject.mockResolvedValue(ok(cloudProject()));
     tasksRepo.upsertTask.mockResolvedValue(ok(cloudTask()));
-    dailyNotesRepo.upsertDailyNote.mockResolvedValue(ok(cloudNote()));
+    quickNotesRepo.upsertQuickNote.mockResolvedValue(ok(cloudNote()));
     projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
     tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([cloudNote()]));
 
     await runMigration(localData(), accountId);
 
     expect(projectsRepo.upsertProject).toHaveBeenCalledWith(project, accountId);
     expect(tasksRepo.upsertTask).toHaveBeenCalledWith(task, accountId);
-    expect(dailyNotesRepo.upsertDailyNote).toHaveBeenCalledWith(note, accountId);
+    expect(quickNotesRepo.upsertQuickNote).toHaveBeenCalledWith(note, accountId);
   });
 
   it('stops immediately and reports authError, without abandoning already-uploaded records, when a later record hits an account mismatch', async () => {
@@ -148,9 +154,9 @@ describe('runMigration — account-affinity pinning', () => {
     // The project, and the first task (uploaded before the mismatch was hit
     // on the second task), are still reported as uploaded — this is not
     // silently discarded — but nothing after the mismatch is attempted: no
-    // daily notes, and no verification re-read.
-    expect(outcome.uploaded).toEqual({ projects: 1, tasks: 1, dailyNotes: 0 });
-    expect(dailyNotesRepo.upsertDailyNote).not.toHaveBeenCalled();
+    // quick notes, and no verification re-read.
+    expect(outcome.uploaded).toEqual({ projects: 1, tasks: 1, quickNotes: 0 });
+    expect(quickNotesRepo.upsertQuickNote).not.toHaveBeenCalled();
     expect(projectsRepo.listProjects).not.toHaveBeenCalled();
   });
 });
@@ -166,13 +172,13 @@ describe('runMigration — successful migration', () => {
       callOrder.push('upsertTask');
       return ok(cloudTask(t));
     });
-    dailyNotesRepo.upsertDailyNote.mockImplementation(async (n: DailyNote) => {
-      callOrder.push('upsertDailyNote');
+    quickNotesRepo.upsertQuickNote.mockImplementation(async (n: QuickNote) => {
+      callOrder.push('upsertQuickNote');
       return ok(cloudNote(n));
     });
     projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
     tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([cloudNote()]));
 
     const outcome = await runMigration(localData(), accountId);
 
@@ -180,16 +186,16 @@ describe('runMigration — successful migration', () => {
     // records, plus the caller-supplied account id.
     expect(projectsRepo.upsertProject).toHaveBeenCalledWith(project, accountId);
     expect(tasksRepo.upsertTask).toHaveBeenCalledWith(task, accountId);
-    expect(dailyNotesRepo.upsertDailyNote).toHaveBeenCalledWith(note, accountId);
+    expect(quickNotesRepo.upsertQuickNote).toHaveBeenCalledWith(note, accountId);
 
     // Projects uploaded before tasks.
     expect(callOrder.indexOf('upsertProject')).toBeLessThan(callOrder.indexOf('upsertTask'));
 
     expect(outcome.ok).toBe(true);
-    expect(outcome.uploaded).toEqual({ projects: 1, tasks: 1, dailyNotes: 1 });
+    expect(outcome.uploaded).toEqual({ projects: 1, tasks: 1, quickNotes: 1 });
     expect(outcome.uploadFailures).toEqual([]);
     expect(outcome.verification?.passed).toBe(true);
-    expect(outcome.verification?.cloudCountsAfter).toEqual({ projects: 1, tasks: 1, dailyNotes: 1 });
+    expect(outcome.verification?.cloudCountsAfter).toEqual({ projects: 1, tasks: 1, quickNotes: 1 });
   });
 });
 
@@ -203,10 +209,10 @@ describe('runMigration — partial failure reporting', () => {
       }
       return ok(cloudTask(t));
     });
-    dailyNotesRepo.upsertDailyNote.mockResolvedValue(ok(cloudNote()));
+    quickNotesRepo.upsertQuickNote.mockResolvedValue(ok(cloudNote()));
     projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
     tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([cloudNote()]));
 
     const outcome = await runMigration(localData({ tasks: [task, secondTask] }), accountId);
 
@@ -224,11 +230,11 @@ describe('runMigration — verification failure reporting', () => {
   it('does not report success when a re-read after upload does not confirm the record', async () => {
     projectsRepo.upsertProject.mockResolvedValue(ok(cloudProject()));
     tasksRepo.upsertTask.mockResolvedValue(ok(cloudTask()));
-    dailyNotesRepo.upsertDailyNote.mockResolvedValue(ok(cloudNote()));
+    quickNotesRepo.upsertQuickNote.mockResolvedValue(ok(cloudNote()));
     // Re-read "loses" the task — e.g. eventual consistency or replication lag.
     projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
     tasksRepo.listTasks.mockResolvedValue(ok([]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([cloudNote()]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([cloudNote()]));
 
     const outcome = await runMigration(localData(), accountId);
 
@@ -243,11 +249,11 @@ describe('runMigration — verification failure reporting', () => {
   it('flags a field mismatch between the local record and what verification reads back', async () => {
     projectsRepo.upsertProject.mockResolvedValue(ok(cloudProject()));
     tasksRepo.upsertTask.mockResolvedValue(ok(cloudTask()));
-    dailyNotesRepo.upsertDailyNote.mockResolvedValue(ok(cloudNote()));
+    quickNotesRepo.upsertQuickNote.mockResolvedValue(ok(cloudNote()));
     projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
     tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
     // Re-read shows different content than what was migrated.
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([{ ...cloudNote(), evening: 'Something else' }]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([{ ...cloudNote(), text: 'Something else' }]));
 
     const outcome = await runMigration(localData(), accountId);
 
@@ -255,9 +261,9 @@ describe('runMigration — verification failure reporting', () => {
     expect(outcome.verification?.passed).toBe(false);
     expect(outcome.verification?.issues).toEqual([
       {
-        entity: 'dailyNote',
+        entity: 'quickNote',
         id: 'note-stable-1',
-        label: '2026-08-30',
+        label: 'Buy underwear',
         reason: 'content does not match the local record',
       },
     ]);

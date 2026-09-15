@@ -53,6 +53,15 @@ export interface CloudSyncState {
   message: string | null;
   localCounts: EntityCounts | null;
   cloudCounts: EntityCounts | null;
+  /**
+   * Set whenever Quick Notes specifically could not be read from the cloud
+   * during the most recent hydrate/refresh pass, independent of `status` —
+   * a Quick Notes outage never fails the overall hydrate/refresh (see
+   * hydrateFromCloud.ts / refreshFromCloud.ts), so this is the only place
+   * that failure is still visible rather than silently swallowed. `null`
+   * once a pass reads Quick Notes successfully.
+   */
+  quickNotesError: string | null;
   /** Re-runs the last hydration attempt. Only meaningful while status is 'error'. */
   retry: () => void;
   /**
@@ -81,8 +90,8 @@ function updateMetadataAfterHydration(
   for (const task of hydrated.tasks) {
     next = setRecordUpdatedAt(next, 'task', task.id, task.updatedAt);
   }
-  for (const note of hydrated.dailyNotes) {
-    next = setRecordUpdatedAt(next, 'dailyNote', note.id, note.updatedAt);
+  for (const note of hydrated.quickNotes) {
+    next = setRecordUpdatedAt(next, 'quickNote', note.id, note.updatedAt);
   }
   for (const goal of hydrated.goals) {
     next = setRecordUpdatedAt(next, 'goal', goal.id, goal.updatedAt);
@@ -100,6 +109,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
   const [message, setMessage] = useState<string | null>(null);
   const [localCounts, setLocalCounts] = useState<EntityCounts | null>(null);
   const [cloudCounts, setCloudCounts] = useState<EntityCounts | null>(null);
+  const [quickNotesError, setQuickNotesError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   // Set by `refreshAcceptingServer` just before bumping `attempt`, and
   // consumed (then reset) the next time the effect below actually runs a
@@ -122,6 +132,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
       setMessage(null);
       setLocalCounts(null);
       setCloudCounts(null);
+      setQuickNotesError(null);
       return;
     }
 
@@ -138,6 +149,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
 
       setLocalCounts(result.localCounts ?? null);
       setCloudCounts(result.cloudCounts ?? null);
+      setQuickNotesError(result.quickNotesError ?? null);
 
       switch (result.decision.kind) {
         case 'hydrate-from-cloud': {
@@ -184,6 +196,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
           }
           const nextMetadata = setLastSyncedAt(refreshed.metadata, new Date().toISOString());
           saveSyncMetadataStore(upsertAccountMetadata(metadataStore, nextMetadata));
+          setQuickNotesError(refreshed.quickNotesError ?? null);
           setStatus('up-to-date');
           setMessage(null);
           return;
@@ -235,6 +248,7 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
     message,
     localCounts,
     cloudCounts,
+    quickNotesError,
     retry: () => setAttempt((n) => n + 1),
     refreshAcceptingServer: () => {
       acceptConflictsRef.current = true;

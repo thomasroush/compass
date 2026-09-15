@@ -1,5 +1,5 @@
 import type { AppData } from '../types';
-import { listDailyNotes, upsertDailyNote } from './dailyNotesRepository';
+import { listQuickNotes, upsertQuickNote } from './quickNotesRepository';
 import { listProjects, upsertProject } from './projectsRepository';
 import { listTasks, upsertTask } from './tasksRepository';
 import type { RepositoryResult } from './types';
@@ -30,18 +30,18 @@ import type { RepositoryResult } from './types';
 export interface MigrationCounts {
   projects: number;
   tasks: number;
-  dailyNotes: number;
+  quickNotes: number;
 }
 
 function zeroCounts(): MigrationCounts {
-  return { projects: 0, tasks: 0, dailyNotes: 0 };
+  return { projects: 0, tasks: 0, quickNotes: 0 };
 }
 
 export function countLocalData(local: AppData): MigrationCounts {
   return {
     projects: local.projects.length,
     tasks: local.tasks.length,
-    dailyNotes: local.dailyNotes.length,
+    quickNotes: local.quickNotes.length,
   };
 }
 
@@ -55,7 +55,7 @@ export async function getCloudCounts(): Promise<RepositoryResult<MigrationCounts
   const [projectsResult, tasksResult, notesResult] = await Promise.all([
     listProjects(),
     listTasks(),
-    listDailyNotes(),
+    listQuickNotes(),
   ]);
 
   if (!projectsResult.ok) return projectsResult;
@@ -67,12 +67,12 @@ export async function getCloudCounts(): Promise<RepositoryResult<MigrationCounts
     data: {
       projects: projectsResult.data.length,
       tasks: tasksResult.data.length,
-      dailyNotes: notesResult.data.length,
+      quickNotes: notesResult.data.length,
     },
   };
 }
 
-export type MigrationEntity = 'project' | 'task' | 'dailyNote';
+export type MigrationEntity = 'project' | 'task' | 'quickNote';
 
 export interface MigrationRecordFailure {
   entity: MigrationEntity;
@@ -192,10 +192,10 @@ export async function runMigration(
     }
   }
 
-  for (const note of local.dailyNotes) {
-    const result = await upsertDailyNote(note, expectedAccountId);
+  for (const note of local.quickNotes) {
+    const result = await upsertQuickNote(note, expectedAccountId);
     if (result.ok) {
-      uploaded.dailyNotes += 1;
+      uploaded.quickNotes += 1;
       migratedNoteIds.add(note.id);
     } else {
       if (isAuthFailure(result.error.type)) {
@@ -209,9 +209,9 @@ export async function runMigration(
         };
       }
       uploadFailures.push({
-        entity: 'dailyNote',
+        entity: 'quickNote',
         id: note.id,
-        label: note.date,
+        label: note.text,
         message: result.error.message,
       });
     }
@@ -223,7 +223,7 @@ export async function runMigration(
   const [projectsResult, tasksResult, notesResult] = await Promise.all([
     listProjects(),
     listTasks(),
-    listDailyNotes(),
+    listQuickNotes(),
   ]);
 
   if (!projectsResult.ok || !tasksResult.ok || !notesResult.ok) {
@@ -299,25 +299,21 @@ export async function runMigration(
     }
   }
 
-  for (const note of local.dailyNotes) {
+  for (const note of local.quickNotes) {
     if (!migratedNoteIds.has(note.id)) continue;
     const cloud = noteById.get(note.id);
     if (!cloud) {
       issues.push({
-        entity: 'dailyNote',
+        entity: 'quickNote',
         id: note.id,
-        label: note.date,
+        label: note.text,
         reason: 'not found in Supabase after migration',
       });
-    } else if (
-      cloud.date !== note.date ||
-      cloud.morning !== note.morning ||
-      cloud.evening !== note.evening
-    ) {
+    } else if (cloud.text !== note.text || cloud.completed !== note.completed) {
       issues.push({
-        entity: 'dailyNote',
+        entity: 'quickNote',
         id: note.id,
-        label: note.date,
+        label: note.text,
         reason: 'content does not match the local record',
       });
     }
@@ -335,7 +331,7 @@ export async function runMigration(
       cloudCountsAfter: {
         projects: cloudProjects.length,
         tasks: cloudTasks.length,
-        dailyNotes: cloudNotes.length,
+        quickNotes: cloudNotes.length,
       },
       issues,
     },

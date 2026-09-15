@@ -1,5 +1,5 @@
 import type {
-  DailyNote,
+  QuickNote,
   Goal,
   GoalStatus,
   Priority,
@@ -11,7 +11,7 @@ import type {
   Task,
   TaskStatus,
 } from '../types';
-import type { CloudDailyNote, CloudGoal, CloudProject, CloudTarget, CloudTask } from './types';
+import type { CloudQuickNote, CloudGoal, CloudProject, CloudTarget, CloudTask } from './types';
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -196,56 +196,68 @@ export function taskUpdatesToRow(updates: Partial<Omit<Task, 'id' | 'createdAt'>
 }
 
 // ---------------------------------------------------------------------------
-// Daily notes
+// Quick notes
 // ---------------------------------------------------------------------------
 
-export interface DailyNoteRow {
+export interface QuickNoteRow {
   id: string;
-  note_date: string;
-  morning_notes: string;
-  evening_notes: string;
+  text: string;
+  completed: boolean;
+  deleted: boolean;
+  created_at: string;
+  completed_at: string | null;
   updated_at: string;
 }
 
-export function dailyNoteFromRow(row: DailyNoteRow): CloudDailyNote {
+export function quickNoteFromRow(row: QuickNoteRow): CloudQuickNote {
   return {
     id: row.id,
-    date: row.note_date,
-    morning: row.morning_notes,
-    evening: row.evening_notes,
+    text: row.text,
+    completed: row.completed,
+    deleted: row.deleted,
+    createdAt: row.created_at,
+    completedAt: row.completed_at ?? undefined,
     updatedAt: row.updated_at,
   };
 }
 
-export interface DailyNoteInsertRow {
+export interface QuickNoteInsertRow {
   id: string;
   user_id: string;
-  note_date: string;
-  morning_notes: string;
-  evening_notes: string;
+  text: string;
+  completed: boolean;
+  deleted: boolean;
+  created_at: string;
+  completed_at: string | null;
 }
 
-export function dailyNoteToInsertRow(userId: string, note: DailyNote): DailyNoteInsertRow {
+export function quickNoteToInsertRow(userId: string, note: QuickNote): QuickNoteInsertRow {
   return {
     id: note.id,
     user_id: userId,
-    note_date: note.date,
-    morning_notes: note.morning,
-    evening_notes: note.evening,
+    text: note.text,
+    completed: note.completed,
+    deleted: note.deleted,
+    created_at: note.createdAt,
+    completed_at: note.completedAt ?? null,
   };
 }
 
-export interface DailyNoteUpdateRow {
-  morning_notes?: string;
-  evening_notes?: string;
+export interface QuickNoteUpdateRow {
+  text?: string;
+  completed?: boolean;
+  deleted?: boolean;
+  completed_at?: string | null;
 }
 
-export function dailyNoteUpdatesToRow(
-  updates: Partial<Pick<DailyNote, 'morning' | 'evening'>>,
-): DailyNoteUpdateRow {
-  const row: DailyNoteUpdateRow = {};
-  if ('morning' in updates) row.morning_notes = updates.morning;
-  if ('evening' in updates) row.evening_notes = updates.evening;
+export function quickNoteUpdatesToRow(
+  updates: Partial<Pick<QuickNote, 'text' | 'completed' | 'deleted' | 'completedAt'>>,
+): QuickNoteUpdateRow {
+  const row: QuickNoteUpdateRow = {};
+  if ('text' in updates) row.text = updates.text;
+  if ('completed' in updates) row.completed = updates.completed;
+  if ('deleted' in updates) row.deleted = updates.deleted;
+  if ('completedAt' in updates) row.completed_at = updates.completedAt ?? null;
   return row;
 }
 

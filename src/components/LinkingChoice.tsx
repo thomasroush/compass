@@ -40,6 +40,11 @@ export function LinkingChoice() {
   const [confirming, setConfirming] = useState<Choice | null>(null);
   const [working, setWorking] = useState(false);
   const [deferredNote, setDeferredNote] = useState<KeepLocalOutcome['deferred'] | null>(null);
+  // Set when Quick Notes specifically could not be read — never blocks this
+  // screen (see loadCloudBundle's doc comment), but every choice below must
+  // know not to treat the resulting placeholder empty array as real cloud
+  // content for that one entity.
+  const [quickNotesError, setQuickNotesError] = useState<string | null>(null);
 
   const accountId = auth.user?.id ?? null;
 
@@ -54,7 +59,8 @@ export function LinkingChoice() {
         return;
       }
       setCloud(result.data);
-      setComparison(compareForLinking(state, result.data));
+      setQuickNotesError(result.quickNotesError ?? null);
+      setComparison(compareForLinking(state, result.data, !result.quickNotesError));
       setLoadState('ready');
     });
     return () => {
@@ -96,7 +102,10 @@ export function LinkingChoice() {
       setConfirming(null);
       return;
     }
-    dispatch({ type: 'APPLY_REMOTE_UPDATE', data: buildUseCloudData(fresh.data) });
+    dispatch({
+      type: 'APPLY_REMOTE_UPDATE',
+      data: buildUseCloudData(fresh.data, state, !fresh.quickNotesError),
+    });
     finish();
   }
 
@@ -112,7 +121,7 @@ export function LinkingChoice() {
     const hasDeferred =
       outcome.deferred.project.length > 0 ||
       outcome.deferred.task.length > 0 ||
-      outcome.deferred.dailyNote.length > 0 ||
+      outcome.deferred.quickNote.length > 0 ||
       outcome.deferred.goal.length > 0 ||
       outcome.deferred.target.length > 0;
     if (hasDeferred) {
@@ -128,7 +137,7 @@ export function LinkingChoice() {
   }
 
   const counts = (c: LinkingComparison['localOnly']) =>
-    c.project.length + c.task.length + c.dailyNote.length + c.goal.length + c.target.length;
+    c.project.length + c.task.length + c.quickNote.length + c.goal.length + c.target.length;
 
   return (
     <div className="dialog-backdrop" role="presentation">
@@ -161,6 +170,13 @@ export function LinkingChoice() {
               This device has never been linked to <strong>{auth.user?.email}</strong>. Nothing has
               been changed yet — choose how to resolve this before continuing.
             </p>
+            {quickNotesError && (
+              <p className="message error" role="alert">
+                Quick Notes could not be compared with your account just now: {quickNotesError} They
+                are excluded from the counts below and left exactly as they are on this device,
+                whichever option you choose — they will sync automatically once this is resolved.
+              </p>
+            )}
             <ul>
               <li>
                 {counts(comparison.localOnly)} record{counts(comparison.localOnly) === 1 ? '' : 's'} only on this
@@ -209,7 +225,7 @@ export function LinkingChoice() {
         {confirming === 'use-cloud' && (
           <>
             <p className="message error" role="alert">
-              This replaces every task, project, daily note, goal, and target on this device with
+              This replaces every task, project, quick note, goal, and target on this device with
               what is currently in your account. Anything on this device that is not already in
               your account will be lost.
             </p>
@@ -251,7 +267,7 @@ export function LinkingChoice() {
               This device is now linked. Most records were saved to your account immediately;{' '}
               {deferredNote.project.length +
                 deferredNote.task.length +
-                deferredNote.dailyNote.length +
+                deferredNote.quickNote.length +
                 deferredNote.goal.length +
                 deferredNote.target.length}{' '}
               could not be confirmed right away and will sync automatically the next time this

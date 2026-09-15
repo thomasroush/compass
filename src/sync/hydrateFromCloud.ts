@@ -1,10 +1,10 @@
-import type { AppData, DailyNote } from '../types';
-import { listDailyNotes } from '../repository/dailyNotesRepository';
+import type { AppData } from '../types';
+import { listQuickNotes } from '../repository/quickNotesRepository';
 import { listGoals } from '../repository/goalsRepository';
 import { listProjects } from '../repository/projectsRepository';
 import { listTargets } from '../repository/targetsRepository';
 import { listTasks } from '../repository/tasksRepository';
-import type { CloudDailyNote, CloudGoal, CloudProject, CloudTarget, CloudTask } from '../repository/types';
+import type { CloudQuickNote, CloudGoal, CloudProject, CloudTarget, CloudTask } from '../repository/types';
 import { decideHydration, type EntityCounts, type HydrationDecision } from './hydration';
 
 /**
@@ -16,7 +16,7 @@ import { decideHydration, type EntityCounts, type HydrationDecision } from './hy
  * This module only ever reads from Supabase. It never calls a create/update/
  * upsert/delete repository function, so it cannot write or overwrite a cloud
  * record. Like every function in `src/repository/`, it never accepts a user
- * id — `listProjects`/`listTasks`/`listDailyNotes` each resolve `user_id`
+ * id — `listProjects`/`listTasks`/`listQuickNotes` each resolve `user_id`
  * solely from the live Supabase session, so there is no parameter through
  * which a caller could request another user's data.
  */
@@ -26,7 +26,7 @@ export interface HydratedCloudData {
   /** Raw cloud records (with `updatedAt`), for seeding device-local sync metadata. Never sent back to Supabase. */
   projects: CloudProject[];
   tasks: CloudTask[];
-  dailyNotes: CloudDailyNote[];
+  quickNotes: CloudQuickNote[];
   goals: CloudGoal[];
   targets: CloudTarget[];
 }
@@ -39,6 +39,15 @@ export interface HydrateFromCloudResult {
   cloudCounts?: EntityCounts;
   /** Present only when `decision.kind === 'hydrate-from-cloud'` — the data that is safe to load. */
   hydrated?: HydratedCloudData;
+  /**
+   * Set when Quick Notes specifically could not be read, even though the
+   * overall decision still succeeded from projects/tasks/goals/targets. A
+   * Quick Notes outage must never block the rest of the account's data from
+   * loading or refreshing (see this function's doc comment) — this field is
+   * how that partial failure is still surfaced to the caller instead of
+   * being silently swallowed.
+   */
+  quickNotesError?: string;
 }
 
 // Parameterized as `T & { updatedAt: string }` (matching src/sync/linkingChoice.ts's
@@ -54,58 +63,36 @@ function stripUpdatedAt<T>(record: T & { updatedAt: string }): T {
   return rest as T;
 }
 
-function isMeaningfulDailyNote(note: DailyNote): boolean {
-  return note.morning.trim() !== '' || note.evening.trim() !== '';
-}
-
 /**
  * Local counts for the hydration decision, not the raw record counts Phase
- * 5A's migration display uses (`countLocalData` in `repository/migration.ts`
- * — left untouched, since a blank note is still harmless to *offer* to
- * migrate under an explicit, user-confirmed action).
+ * 5A's migration display uses (`countLocalData` in `repository/migration.ts`).
  *
- * `DailyNotesView` autosaves a placeholder daily-note record (blank
- * `morning`/`evening`) purely from visiting the page — its debounce effect
- * fires on mount regardless of whether the user typed anything, and the
- * reducer's `UPSERT_DAILY_NOTE` creates a new record even when both fields
- * are empty strings. That record is indistinguishable from "no note" in the
- * UI and carries no content, so on its own it must not make this device
- * look "populated" and block a safe, unattended cloud pull (`LOAD` replaces
- * local state entirely — see `decideHydration`'s `hydrate-from-cloud` case
- * — so getting this wrong in the other direction, by undercounting real
- * data, would silently destroy it).
+ * Every entity here has the same guarantee: `ADD_TASK`/`ADD_PROJECT`/
+ * `ADD_QUICK_NOTE`/`ADD_GOAL`/`ADD_TARGET` all refuse to create a record with
+ * blank, trimmed-empty required text, so anything that exists locally has
+ * real user-entered content and is counted as-is — archived tasks and
+ * archived Targets included (hidden from the default view by a filter, not
+ * actually empty, so excluding them would risk genuine, silent data loss).
+ * Soft-deleted Quick Notes (see `QuickNote.deleted`) are counted too, for the
+ * same reason: they still hold real content and still exist as rows this
+ * device must reconcile with the cloud, they are just hidden from the UI.
  *
- * Projects and tasks have no equivalent loophole: `ADD_PROJECT`/`ADD_TASK`
- * both refuse to create a record with a blank, trimmed-empty name/title, so
- * every project/task that exists has real user-entered content and is
- * counted as-is — archived tasks included. An archived task still holds a
- * real title; it is only hidden from the default view by a filter, not
- * actually empty, so excluding it would risk a genuine, silent data loss.
- *
- * Goals and Targets are the same as Projects/Tasks in this respect —
- * `ADD_GOAL`/`ADD_TARGET` both refuse a blank, trimmed-empty name — so they
- * are counted as-is too, archived Targets included. This is also what closes
- * the hydration data-loss window Goals/Targets previously exposed: before
- * this, a device with real local Goals/Targets but zero tasks/projects/notes
- * would have been misreported as "local is empty," and `hydrateFromCloud`
- * would wholesale-replace local state (via `LOAD`) with cloud data that, at
- * the time, could not carry Goals/Targets forward — silently deleting them.
- * Counting them here means such a device is now correctly reported as
- * populated, so `decideHydration` calls for an explicit choice (or
- * await-explicit-migration) instead of an unattended overwrite.
+ * Undercounting here is the dangerous direction: `hydrate-from-cloud`
+ * wholesale-replaces local state via `LOAD` (see `decideHydration`), so a
+ * device wrongly reported as "empty" would silently lose real local data.
  */
 function meaningfulLocalCounts(local: AppData): EntityCounts {
   return {
     projects: local.projects.length,
     tasks: local.tasks.length,
-    dailyNotes: local.dailyNotes.filter(isMeaningfulDailyNote).length,
+    quickNotes: local.quickNotes.length,
     goals: local.goals.length,
     targets: local.targets.length,
   };
 }
 
 /**
- * Reads this signed-in user's cloud projects/tasks/daily notes and decides
+ * Reads this signed-in user's cloud projects/tasks/quick notes and decides
  * what, if anything, this device should do with them.
  *
  * - Never called with, or able to derive, another user's id — `authStatus`
@@ -127,16 +114,24 @@ export async function hydrateFromCloud(
 
   const localCounts = meaningfulLocalCounts(local);
 
-  const [projectsResult, tasksResult, notesResult, goalsResult, targetsResult] = await Promise.all([
+  // Quick Notes is read independently of the other four entities. A Quick
+  // Notes-specific outage (e.g. its table not existing yet in a given
+  // Supabase project) must never prevent projects/tasks/goals/targets from
+  // hydrating or refreshing normally — see HydrateFromCloudResult.quickNotesError.
+  // Failures in the other four remain hard failures, exactly as before: they
+  // are core account data and this function still refuses to guess about
+  // them.
+  const [projectsResult, tasksResult, goalsResult, targetsResult, notesResult] = await Promise.all([
     listProjects(),
     listTasks(),
-    listDailyNotes(),
     listGoals(),
     listTargets(),
+    listQuickNotes(),
   ]);
 
   // Checked in a fixed order (matching migration.ts's getCloudCounts) so the
-  // reported error is deterministic when more than one read fails.
+  // reported error is deterministic when more than one read fails. Quick
+  // Notes is deliberately not part of this hard-fail chain.
   if (!projectsResult.ok) {
     return {
       decision: { kind: 'cloud-query-failed', errorType: projectsResult.error.type, message: projectsResult.error.message },
@@ -146,12 +141,6 @@ export async function hydrateFromCloud(
   if (!tasksResult.ok) {
     return {
       decision: { kind: 'cloud-query-failed', errorType: tasksResult.error.type, message: tasksResult.error.message },
-      localCounts,
-    };
-  }
-  if (!notesResult.ok) {
-    return {
-      decision: { kind: 'cloud-query-failed', errorType: notesResult.error.type, message: notesResult.error.message },
       localCounts,
     };
   }
@@ -168,10 +157,18 @@ export async function hydrateFromCloud(
     };
   }
 
+  const quickNotesError = notesResult.ok ? undefined : notesResult.error.message;
+
+  // When Quick Notes could not be read, its cloud count is unknown — mirror
+  // this device's own local count on both sides of the comparison instead of
+  // guessing. That can never make local look "more empty" than it truly is
+  // (the local side always uses the real local count), so it can never
+  // trigger an unsafe unattended overwrite of real local Quick Notes; at
+  // worst it makes the Quick Notes side of the comparison a no-op.
   const cloudCounts: EntityCounts = {
     projects: projectsResult.data.length,
     tasks: tasksResult.data.length,
-    dailyNotes: notesResult.data.length,
+    quickNotes: notesResult.ok ? notesResult.data.length : localCounts.quickNotes,
     goals: goalsResult.data.length,
     targets: targetsResult.data.length,
   };
@@ -184,18 +181,22 @@ export async function hydrateFromCloud(
   });
 
   if (decision.kind !== 'hydrate-from-cloud') {
-    return { decision, localCounts, cloudCounts };
+    return { decision, localCounts, cloudCounts, quickNotesError };
   }
 
   // Goals/targets are always included, even when empty (listX already
   // returns [] for zero rows, never undefined) — a device hydrating from a
   // cloud account with no Goals/Targets yet must not end up with the field
-  // missing/undefined now that AppData requires it.
+  // missing/undefined now that AppData requires it. Quick Notes falls back
+  // to this device's own current local notes, unchanged, when the cloud
+  // read failed — there is no cloud truth to replace them with, and (per the
+  // mirroring above) local Quick Notes can only be empty here anyway when
+  // that read failed, so this is never silent data loss.
   const appData: AppData = {
     version: 1,
     projects: projectsResult.data.map(stripUpdatedAt),
     tasks: tasksResult.data.map(stripUpdatedAt),
-    dailyNotes: notesResult.data.map(stripUpdatedAt),
+    quickNotes: notesResult.ok ? notesResult.data.map(stripUpdatedAt) : local.quickNotes,
     goals: goalsResult.data.map(stripUpdatedAt),
     targets: targetsResult.data.map(stripUpdatedAt),
   };
@@ -204,11 +205,12 @@ export async function hydrateFromCloud(
     decision,
     localCounts,
     cloudCounts,
+    quickNotesError,
     hydrated: {
       appData,
       projects: projectsResult.data,
       tasks: tasksResult.data,
-      dailyNotes: notesResult.data,
+      quickNotes: notesResult.ok ? notesResult.data : [],
       goals: goalsResult.data,
       targets: targetsResult.data,
     },

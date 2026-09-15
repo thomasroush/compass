@@ -1,13 +1,13 @@
 import {
   AppData,
   createEmptyAppData,
-  DailyNote,
   GOAL_STATUSES,
   Goal,
   GoalStatus,
   PRIORITIES,
   PROJECT_STATUSES,
   Project,
+  QuickNote,
   TARGET_TYPES,
   TARGET_VALUE_FORMATS,
   TASK_STATUSES,
@@ -16,6 +16,7 @@ import {
   TargetValueFormat,
   Task,
   TaskStatus,
+  generateId,
 } from '../types';
 
 export type ValidationResult =
@@ -172,20 +173,62 @@ function validateTarget(value: unknown): Target | null {
   return { ...base, type: 'linked-tasks', taskIds: t.taskIds };
 }
 
-function validateDailyNote(value: unknown): DailyNote | null {
+function validateQuickNote(value: unknown): QuickNote | null {
   if (!value || typeof value !== 'object') return null;
   const n = value as Record<string, unknown>;
   if (!isString(n.id) || !n.id) return null;
-  if (!isString(n.date)) return null;
-  if (!isString(n.morning)) return null;
-  if (!isString(n.evening)) return null;
+  if (!isString(n.text)) return null;
+  if (!isBoolean(n.completed)) return null;
+  if (!isBoolean(n.deleted)) return null;
+  if (!isString(n.createdAt)) return null;
+  if (n.completedAt !== undefined && !isString(n.completedAt)) return null;
 
   return {
     id: n.id,
-    date: n.date,
-    morning: n.morning,
-    evening: n.evening,
+    text: n.text,
+    completed: n.completed,
+    deleted: n.deleted,
+    createdAt: n.createdAt,
+    completedAt: n.completedAt,
   };
+}
+
+/**
+ * Best-effort, one-time conversion of the retired Daily Notes feature's
+ * records (`{ id, date, morning, evening }`, keyed under the old `dailyNotes`
+ * field) into the new Quick Notes shape, for a backup/localStorage payload
+ * saved before this migration existed. Only runs when `quickNotes` itself is
+ * absent — once a payload has been saved under the new shape, the old key is
+ * never consulted again, even if still present. Blank (both fields empty)
+ * daily notes carry no content and are dropped, matching how the retired
+ * feature's own autosave-created blanks were never treated as real data
+ * (see the former sync/hydrateFromCloud.ts isMeaningfulDailyNote). Every
+ * migrated note starts unread in the active list (not completed, not
+ * deleted) so the user notices and can act on it, rather than being silently
+ * folded away.
+ */
+function migrateLegacyDailyNotes(rawNotes: unknown): QuickNote[] {
+  if (!Array.isArray(rawNotes)) return [];
+  const migrated: QuickNote[] = [];
+  for (const value of rawNotes) {
+    if (!value || typeof value !== 'object') continue;
+    const n = value as Record<string, unknown>;
+    const morning = isString(n.morning) ? n.morning.trim() : '';
+    const evening = isString(n.evening) ? n.evening.trim() : '';
+    if (!morning && !evening) continue;
+    const text = [morning && `Morning: ${morning}`, evening && `Evening: ${evening}`]
+      .filter(Boolean)
+      .join(' / ');
+    const date = isString(n.date) ? n.date : undefined;
+    migrated.push({
+      id: generateId(),
+      text,
+      completed: false,
+      deleted: false,
+      createdAt: date ? `${date}T00:00:00.000Z` : new Date().toISOString(),
+    });
+  }
+  return migrated;
 }
 
 export function validateAppData(raw: unknown): ValidationResult {
@@ -207,8 +250,12 @@ export function validateAppData(raw: unknown): ValidationResult {
     return { ok: false, error: 'Projects must be an array.' };
   }
 
-  if (!Array.isArray(obj.dailyNotes)) {
-    return { ok: false, error: 'Daily notes must be an array.' };
+  // Backward compatibility: a payload saved before Quick Notes replaced Daily
+  // Notes has no `quickNotes` key at all (only the retired `dailyNotes`
+  // shape, converted below) — treat a missing key as "nothing saved under
+  // the new shape yet", but still reject it when present with the wrong type.
+  if (obj.quickNotes !== undefined && !Array.isArray(obj.quickNotes)) {
+    return { ok: false, error: 'Quick notes must be an array.' };
   }
 
   // Backward compatibility: a backup taken before Goals/Targets existed has
@@ -239,13 +286,18 @@ export function validateAppData(raw: unknown): ValidationResult {
     projects.push(project);
   }
 
-  const dailyNotes: DailyNote[] = [];
-  for (let i = 0; i < obj.dailyNotes.length; i++) {
-    const note = validateDailyNote(obj.dailyNotes[i]);
-    if (!note) {
-      return { ok: false, error: `Invalid daily note at index ${i}.` };
+  let quickNotes: QuickNote[];
+  if (obj.quickNotes !== undefined) {
+    quickNotes = [];
+    for (let i = 0; i < (obj.quickNotes as unknown[]).length; i++) {
+      const note = validateQuickNote((obj.quickNotes as unknown[])[i]);
+      if (!note) {
+        return { ok: false, error: `Invalid quick note at index ${i}.` };
+      }
+      quickNotes.push(note);
     }
-    dailyNotes.push(note);
+  } else {
+    quickNotes = migrateLegacyDailyNotes(obj.dailyNotes);
   }
 
   const ids = new Set<string>();
@@ -254,6 +306,14 @@ export function validateAppData(raw: unknown): ValidationResult {
       return { ok: false, error: `Duplicate task id: ${task.id}.` };
     }
     ids.add(task.id);
+  }
+
+  const quickNoteIds = new Set<string>();
+  for (const note of quickNotes) {
+    if (quickNoteIds.has(note.id)) {
+      return { ok: false, error: `Duplicate quick note id: ${note.id}.` };
+    }
+    quickNoteIds.add(note.id);
   }
 
   const rawGoals = Array.isArray(obj.goals) ? obj.goals : [];
@@ -294,7 +354,7 @@ export function validateAppData(raw: unknown): ValidationResult {
 
   return {
     ok: true,
-    data: { version: 1, tasks, projects, dailyNotes, goals, targets },
+    data: { version: 1, tasks, projects, quickNotes, goals, targets },
   };
 }
 

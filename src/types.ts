@@ -41,11 +41,14 @@ export interface Project {
   priorityRank?: number;
 }
 
-export interface DailyNote {
+export interface QuickNote {
   id: string;
-  date: string;
-  morning: string;
-  evening: string;
+  text: string;
+  completed: boolean;
+  /** Soft-deleted quick notes are excluded from every read path but kept for cloud sync, matching this app's existing archive-not-delete data model (Task.archived, Target.archived). */
+  deleted: boolean;
+  createdAt: string;
+  completedAt?: string;
 }
 
 export const GOAL_STATUSES = ['active', 'achieved', 'paused', 'abandoned'] as const;
@@ -94,7 +97,7 @@ export interface AppData {
   version: 1;
   tasks: Task[];
   projects: Project[];
-  dailyNotes: DailyNote[];
+  quickNotes: QuickNote[];
   goals: Goal[];
   targets: Target[];
 }
@@ -106,7 +109,7 @@ export function createEmptyAppData(): AppData {
     version: 1,
     tasks: [],
     projects: [],
-    dailyNotes: [],
+    quickNotes: [],
     goals: [],
     targets: [],
   };

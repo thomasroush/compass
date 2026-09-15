@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { decideHydration, type EntityCounts, type HydrationInput } from './hydration';
 
-const emptyCounts: EntityCounts = { projects: 0, tasks: 0, dailyNotes: 0, goals: 0, targets: 0 };
-const populatedCounts: EntityCounts = { projects: 4, tasks: 9, dailyNotes: 3, goals: 2, targets: 5 };
+const emptyCounts: EntityCounts = { projects: 0, tasks: 0, quickNotes: 0, goals: 0, targets: 0 };
+const populatedCounts: EntityCounts = { projects: 4, tasks: 9, quickNotes: 3, goals: 2, targets: 5 };
 
 function baseInput(overrides: Partial<HydrationInput> = {}): HydrationInput {
   return {
@@ -61,9 +61,9 @@ describe('decideHydration', () => {
     expect(decision).toEqual({ kind: 'await-explicit-migration' });
   });
 
-  it('treats partial local data (e.g. only a daily note) as populated, not empty', () => {
+  it('treats partial local data (e.g. only a quick note) as populated, not empty', () => {
     const decision = decideHydration(
-      baseInput({ localCounts: { projects: 0, tasks: 0, dailyNotes: 1, goals: 0, targets: 0 } }),
+      baseInput({ localCounts: { projects: 0, tasks: 0, quickNotes: 1, goals: 0, targets: 0 } }),
     );
     expect(decision).toEqual({ kind: 'await-explicit-migration' });
   });
@@ -71,7 +71,7 @@ describe('decideHydration', () => {
   it('treats a device with only Goals/Targets (no tasks/projects/notes) as populated, not empty — closes the hydration data-loss window', () => {
     const decision = decideHydration(
       baseInput({
-        localCounts: { projects: 0, tasks: 0, dailyNotes: 0, goals: 1, targets: 0 },
+        localCounts: { projects: 0, tasks: 0, quickNotes: 0, goals: 1, targets: 0 },
         cloud: { ok: true, counts: populatedCounts },
       }),
     );

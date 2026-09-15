@@ -4,6 +4,7 @@ import { CloudSyncBanner } from './CloudSyncBanner';
 import { CopyToAIDialog } from './CopyToAIDialog';
 import { PasswordRecoveryDialog } from './PasswordRecoveryDialog';
 import { QuickAddTask } from './QuickAddTask';
+import { QuickNoteDialog } from './QuickNoteDialog';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Today' },
@@ -11,7 +12,6 @@ const NAV_ITEMS = [
   { to: '/tasks', label: 'Tasks' },
   { to: '/projects', label: 'Projects' },
   { to: '/goals', label: 'Goals' },
-  { to: '/notes', label: 'Daily Notes' },
   { to: '/calendar', label: 'Calendar' },
   { to: '/about', label: 'About' },
   { to: '/settings', label: 'Settings' },
@@ -20,6 +20,7 @@ const NAV_ITEMS = [
 export function AppShell() {
   const location = useLocation();
   const [copyToAIOpen, setCopyToAIOpen] = useState(false);
+  const [quickNoteOpen, setQuickNoteOpen] = useState(false);
 
   return (
     <div className="app-shell">
@@ -46,6 +47,9 @@ export function AppShell() {
             <img src="/compass_logo.jpg" alt="Daily Compass" className="brand-logo" />
           </div>
           <QuickAddTask />
+          <button type="button" className="secondary" onClick={() => setQuickNoteOpen(true)}>
+            Quick Note
+          </button>
           <button type="button" className="secondary" onClick={() => setCopyToAIOpen(true)}>
             Copy to AI
           </button>
@@ -71,6 +75,7 @@ export function AppShell() {
 
       <PasswordRecoveryDialog />
       {copyToAIOpen && <CopyToAIDialog onClose={() => setCopyToAIOpen(false)} />}
+      {quickNoteOpen && <QuickNoteDialog onClose={() => setQuickNoteOpen(false)} />}
     </div>
   );
 }

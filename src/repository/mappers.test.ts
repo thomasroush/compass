@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { DailyNote, Goal, Project, Target, Task } from '../types';
+import type { Goal, Project, QuickNote, Target, Task } from '../types';
 import {
-  dailyNoteFromRow,
-  dailyNoteToInsertRow,
-  dailyNoteUpdatesToRow,
+  quickNoteFromRow,
+  quickNoteToInsertRow,
+  quickNoteUpdatesToRow,
   goalFromRow,
   goalToInsertRow,
   goalUpdatesToRow,
@@ -208,38 +208,84 @@ describe('task mapping', () => {
   });
 });
 
-describe('daily note mapping', () => {
-  it('maps date/morning/evening columns to the app shape, preserving updated_at', () => {
-    const cloud = dailyNoteFromRow({
+describe('quick note mapping', () => {
+  it('maps text/completed/deleted/timestamps columns to the app shape, preserving updated_at', () => {
+    const cloud = quickNoteFromRow({
       id: 'n1',
-      note_date: '2026-08-30',
-      morning_notes: 'Focus on X',
-      evening_notes: 'Done with X',
+      text: 'Buy underwear',
+      completed: false,
+      deleted: false,
+      created_at: '2026-08-30T00:00:00.000Z',
+      completed_at: null,
       updated_at: '2026-08-30T12:00:00.000Z',
     });
     expect(cloud).toEqual({
       id: 'n1',
-      date: '2026-08-30',
-      morning: 'Focus on X',
-      evening: 'Done with X',
+      text: 'Buy underwear',
+      completed: false,
+      deleted: false,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      completedAt: undefined,
       updatedAt: '2026-08-30T12:00:00.000Z',
     });
   });
 
+  it('maps a non-null completed_at through to completedAt', () => {
+    const cloud = quickNoteFromRow({
+      id: 'n1',
+      text: 'Done thing',
+      completed: true,
+      deleted: false,
+      created_at: '2026-08-30T00:00:00.000Z',
+      completed_at: '2026-08-31T00:00:00.000Z',
+      updated_at: 'ts',
+    });
+    expect(cloud.completedAt).toBe('2026-08-31T00:00:00.000Z');
+  });
+
   it('builds an insert row scoped to the given user id', () => {
-    const note: DailyNote = { id: 'n1', date: '2026-08-30', morning: 'Plan', evening: 'Review' };
-    expect(dailyNoteToInsertRow('user-1', note)).toEqual({
+    const note: QuickNote = {
+      id: 'n1',
+      text: 'Buy underwear',
+      completed: false,
+      deleted: false,
+      createdAt: '2026-08-30T00:00:00.000Z',
+    };
+    expect(quickNoteToInsertRow('user-1', note)).toEqual({
       id: 'n1',
       user_id: 'user-1',
-      note_date: '2026-08-30',
-      morning_notes: 'Plan',
-      evening_notes: 'Review',
+      text: 'Buy underwear',
+      completed: false,
+      deleted: false,
+      created_at: '2026-08-30T00:00:00.000Z',
+      completed_at: null,
     });
   });
 
+  it('builds an insert row carrying a completedAt through as completed_at', () => {
+    const note: QuickNote = {
+      id: 'n1',
+      text: 'Done thing',
+      completed: true,
+      deleted: false,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      completedAt: '2026-08-31T00:00:00.000Z',
+    };
+    expect(quickNoteToInsertRow('user-1', note).completed_at).toBe('2026-08-31T00:00:00.000Z');
+  });
+
   it('builds an update row containing only the fields that were provided', () => {
-    expect(dailyNoteUpdatesToRow({ evening: 'Updated' })).toEqual({ evening_notes: 'Updated' });
-    expect(dailyNoteUpdatesToRow({})).toEqual({});
+    expect(quickNoteUpdatesToRow({ completed: true })).toEqual({ completed: true });
+    expect(quickNoteUpdatesToRow({ text: 'Updated' })).toEqual({ text: 'Updated' });
+    expect(quickNoteUpdatesToRow({})).toEqual({});
+  });
+
+  it('maps an explicit undefined completedAt to null (clearing it, e.g. on reopen)', () => {
+    expect(quickNoteUpdatesToRow({ completedAt: undefined })).toEqual({ completed_at: null });
+  });
+
+  it('maps deleted through for the soft-delete path', () => {
+    expect(quickNoteUpdatesToRow({ deleted: true })).toEqual({ deleted: true });
   });
 });
 

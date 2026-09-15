@@ -19,7 +19,7 @@ import {
 
 describe('SYNC_ENTITIES', () => {
   it('includes goal and target alongside the original three entities', () => {
-    expect(SYNC_ENTITIES).toEqual(['project', 'task', 'dailyNote', 'goal', 'target']);
+    expect(SYNC_ENTITIES).toEqual(['project', 'task', 'quickNote', 'goal', 'target']);
   });
 });
 
@@ -29,8 +29,8 @@ describe('createEmptyAccountMetadata', () => {
       accountId: 'acct-1',
       established: false,
       lastSyncedAt: null,
-      records: { project: {}, task: {}, dailyNote: {}, goal: {}, target: {} },
-      dirty: { project: [], task: [], dailyNote: [], goal: [], target: [] },
+      records: { project: {}, task: {}, quickNote: {}, goal: {}, target: {} },
+      dirty: { project: [], task: [], quickNote: [], goal: [], target: [] },
     });
   });
 });
@@ -92,13 +92,13 @@ describe('record and dirty helpers', () => {
     let metadata = createEmptyAccountMetadata('acct-1');
     metadata = markDirty(metadata, 'task', 't1');
     metadata = markDirty(metadata, 'project', 'p1');
-    metadata = markDirty(metadata, 'dailyNote', 'n1');
+    metadata = markDirty(metadata, 'quickNote', 'n1');
     metadata = markDirty(metadata, 'goal', 'g1');
     metadata = markDirty(metadata, 'target', 'tg1');
 
     metadata = clearAllDirty(metadata);
 
-    expect(metadata.dirty).toEqual({ project: [], task: [], dailyNote: [], goal: [], target: [] });
+    expect(metadata.dirty).toEqual({ project: [], task: [], quickNote: [], goal: [], target: [] });
   });
 
   it('hasDirtyWork/countDirty reflect the total across all entities', () => {

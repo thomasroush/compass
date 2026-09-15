@@ -506,9 +506,9 @@ describe('getGoalProgress', () => {
 });
 
 describe('RESET clears goals and targets', () => {
-  it('empties goals and targets along with tasks/projects/dailyNotes', () => {
+  it('empties goals and targets along with tasks/projects/quickNotes', () => {
     const state = stateWith({ goals: [goal()], targets: [numericTarget()] });
     const next = appReducer(state, { type: 'RESET' });
-    expect(next).toEqual({ version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] });
+    expect(next).toEqual({ version: 1, tasks: [], projects: [], quickNotes: [], goals: [], targets: [] });
   });
 });

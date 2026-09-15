@@ -1,10 +1,10 @@
-import { createDailyNote, listDailyNotes, updateDailyNoteGuarded } from '../repository/dailyNotesRepository';
+import { createQuickNote, listQuickNotes, updateQuickNoteGuarded } from '../repository/quickNotesRepository';
 import { createGoal, listGoals, updateGoalGuarded } from '../repository/goalsRepository';
 import { createProject, listProjects, updateProjectGuarded } from '../repository/projectsRepository';
 import { createTarget, listTargets, updateTargetGuarded } from '../repository/targetsRepository';
 import { createTask, listTasks, updateTaskGuarded } from '../repository/tasksRepository';
 import type { RepositoryError, RepositoryResult } from '../repository/types';
-import type { AppData, DailyNote, Goal, Project, Target, Task } from '../types';
+import type { AppData, QuickNote, Goal, Project, Target, Task } from '../types';
 import {
   clearDirty,
   getAccountMetadata,
@@ -208,34 +208,39 @@ async function syncTask(id: string, accountId: string, getLocalState: () => AppD
   return finishOutcome('task', id, accountId, before, getLocalState().tasks.find((t) => t.id === id), result);
 }
 
-async function syncDailyNote(
+async function syncQuickNote(
   id: string,
   accountId: string,
   getLocalState: () => AppData,
 ): Promise<DrainRecordOutcome> {
-  const before = getLocalState().dailyNotes.find((n) => n.id === id);
+  const before = getLocalState().quickNotes.find((n) => n.id === id);
   if (!before) {
-    patchMetadata(accountId, (m) => clearDirty(m, 'dailyNote', id));
+    patchMetadata(accountId, (m) => clearDirty(m, 'quickNote', id));
     return { kind: 'skipped-missing' };
   }
 
   const knownUpdatedAt = getRecordUpdatedAt(
     getAccountMetadata(loadSyncMetadataStore(), accountId),
-    'dailyNote',
+    'quickNote',
     id,
   );
 
   let result: RepositoryResult<{ updatedAt: string }>;
   if (knownUpdatedAt) {
-    result = await updateDailyNoteGuarded(id, { morning: before.morning, evening: before.evening }, knownUpdatedAt, accountId);
+    result = await updateQuickNoteGuarded(
+      id,
+      { text: before.text, completed: before.completed, deleted: before.deleted, completedAt: before.completedAt },
+      knownUpdatedAt,
+      accountId,
+    );
   } else {
-    result = await createDailyNote(before, accountId);
+    result = await createQuickNote(before, accountId);
     if (!result.ok && result.error.type === 'duplicate') {
-      return resolveDuplicateCreate('dailyNote', id, accountId, before, listDailyNotes);
+      return resolveDuplicateCreate('quickNote', id, accountId, before, listQuickNotes);
     }
   }
 
-  return finishOutcome('dailyNote', id, accountId, before, getLocalState().dailyNotes.find((n) => n.id === id), result);
+  return finishOutcome('quickNote', id, accountId, before, getLocalState().quickNotes.find((n) => n.id === id), result);
 }
 
 async function syncGoal(id: string, accountId: string, getLocalState: () => AppData): Promise<DrainRecordOutcome> {
@@ -308,7 +313,7 @@ async function syncTarget(id: string, accountId: string, getLocalState: () => Ap
   return finishOutcome('target', id, accountId, before, getLocalState().targets.find((t) => t.id === id), result);
 }
 
-function finishOutcome<T extends Project | Task | DailyNote | Goal | Target>(
+function finishOutcome<T extends Project | Task | QuickNote | Goal | Target>(
   entity: SyncEntity,
   id: string,
   accountId: string,
@@ -341,8 +346,8 @@ function finishOutcome<T extends Project | Task | DailyNote | Goal | Target>(
 
 /**
  * One drain pass: attempts every currently-dirty id for `accountId`, in
- * project -> task -> dailyNote -> goal -> target order. Project/task/
- * dailyNote ordering matches migration's own project-before-task rationale,
+ * project -> task -> quickNote -> goal -> target order. Project/task/
+ * quickNote ordering matches migration's own project-before-task rationale,
  * though this loop never actually depends on that ordering the way
  * migration's foreign-key concern does. Goal-before-target is a real
  * dependency, not just convention: see syncTarget's doc comment.
@@ -377,7 +382,7 @@ export async function drainDirtyWork(
   // goals(user_id, id) (see drainSync's syncTarget doc comment), so a
   // target's first create can only succeed once its goal already exists in
   // the cloud — mirrors migration.ts's "projects before tasks" rationale.
-  entityLoop: for (const entity of ['project', 'task', 'dailyNote', 'goal', 'target'] as const) {
+  entityLoop: for (const entity of ['project', 'task', 'quickNote', 'goal', 'target'] as const) {
     const snapshot = getAccountMetadata(loadSyncMetadataStore(), accountId).dirty[entity].slice();
 
     for (const id of snapshot) {
@@ -394,8 +399,8 @@ export async function drainDirtyWork(
             ? await syncProject(id, accountId, getLocalState)
             : entity === 'task'
               ? await syncTask(id, accountId, getLocalState)
-              : entity === 'dailyNote'
-                ? await syncDailyNote(id, accountId, getLocalState)
+              : entity === 'quickNote'
+                ? await syncQuickNote(id, accountId, getLocalState)
                 : entity === 'goal'
                   ? await syncGoal(id, accountId, getLocalState)
                   : await syncTarget(id, accountId, getLocalState);

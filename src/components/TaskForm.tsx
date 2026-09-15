@@ -7,13 +7,17 @@ import { StatusSelect } from './StatusSelect';
 interface TaskFormProps {
   task?: Task;
   onClose: () => void;
+  /** Pre-fills the title field for a new task — used by "Convert to Task" from a Quick Note. Ignored when editing an existing task. */
+  initialTitle?: string;
+  /** Called right after a new task is successfully added (never for an edit) — used to remove the source Quick Note so it isn't duplicated. */
+  onCreated?: () => void;
 }
 
-export function TaskForm({ task, onClose }: TaskFormProps) {
+export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormProps) {
   const { state, dispatch } = useApp();
   const isNew = !task;
 
-  const [title, setTitle] = useState(task?.title ?? '');
+  const [title, setTitle] = useState(task?.title ?? initialTitle ?? '');
   const [notes, setNotes] = useState(task?.notes ?? '');
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'Inbox');
   const [priority, setPriority] = useState(task?.priority ?? 'Normal');
@@ -47,6 +51,7 @@ export function TaskForm({ task, onClose }: TaskFormProps) {
         dueDate: dueDate || undefined,
         dueTime: dueDate ? dueTime || undefined : undefined,
       });
+      onCreated?.();
     } else {
       dispatch({
         type: 'UPDATE_TASK',

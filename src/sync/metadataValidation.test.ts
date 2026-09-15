@@ -41,13 +41,13 @@ describe('validateSyncMetadataStore', () => {
 
   it('rejects a malformed dirty field', () => {
     const bad = createEmptyAccountMetadata('acct-1') as unknown as Record<string, unknown>;
-    bad.dirty = { project: 'not-an-array', task: [], dailyNote: [] };
+    bad.dirty = { project: 'not-an-array', task: [], quickNote: [] };
     expect(validateSyncMetadataStore({ version: 1, accounts: { 'acct-1': bad } }).ok).toBe(false);
   });
 
   it('rejects a malformed records field', () => {
     const bad = createEmptyAccountMetadata('acct-1') as unknown as Record<string, unknown>;
-    bad.records = { project: { p1: { lastKnownUpdatedAt: 123 } }, task: {}, dailyNote: {} };
+    bad.records = { project: { p1: { lastKnownUpdatedAt: 123 } }, task: {}, quickNote: {} };
     expect(validateSyncMetadataStore({ version: 1, accounts: { 'acct-1': bad } }).ok).toBe(false);
   });
 

@@ -12,7 +12,6 @@ import { useCloudSync } from './store/useCloudSync';
 import { AboutView } from './views/AboutView';
 import { BoardView } from './views/BoardView';
 import { CalendarView } from './views/CalendarView';
-import { DailyNotesView } from './views/DailyNotesView';
 import { GoalDetailView } from './views/GoalDetailView';
 import { GoalsView } from './views/GoalsView';
 import { ProjectsView } from './views/ProjectsView';
@@ -51,7 +50,6 @@ function AuthGate() {
         <Route path="projects" element={<ProjectsView />} />
         <Route path="goals" element={<GoalsView />} />
         <Route path="goals/:id" element={<GoalDetailView />} />
-        <Route path="notes" element={<DailyNotesView />} />
         <Route path="calendar" element={<CalendarView />} />
         <Route path="about" element={<AboutView />} />
         <Route path="settings" element={<SettingsView />} />

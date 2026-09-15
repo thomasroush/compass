@@ -96,7 +96,7 @@ export function AccountPanel() {
     <section className="section settings-section">
       <h2>{MODE_COPY[mode].heading}</h2>
       <p className="section-help">
-        Sign in to sync your tasks, projects, and daily notes across devices.
+        Sign in to sync your tasks, projects, and quick notes across devices.
       </p>
 
       {success && (

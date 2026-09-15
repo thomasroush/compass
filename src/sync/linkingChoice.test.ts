@@ -12,10 +12,10 @@ import type { CloudGoal, CloudProject, RepositoryResult } from '../repository/ty
 
 const projectsRepo = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn(), updateProjectGuarded: vi.fn() }));
 const tasksRepo = vi.hoisted(() => ({ listTasks: vi.fn(), createTask: vi.fn(), updateTaskGuarded: vi.fn() }));
-const dailyNotesRepo = vi.hoisted(() => ({
-  listDailyNotes: vi.fn(),
-  createDailyNote: vi.fn(),
-  updateDailyNoteGuarded: vi.fn(),
+const quickNotesRepo = vi.hoisted(() => ({
+  listQuickNotes: vi.fn(),
+  createQuickNote: vi.fn(),
+  updateQuickNoteGuarded: vi.fn(),
 }));
 const goalsRepo = vi.hoisted(() => ({ listGoals: vi.fn(), createGoal: vi.fn(), updateGoalGuarded: vi.fn() }));
 const targetsRepo = vi.hoisted(() => ({
@@ -26,7 +26,7 @@ const targetsRepo = vi.hoisted(() => ({
 
 vi.mock('../repository/projectsRepository', () => projectsRepo);
 vi.mock('../repository/tasksRepository', () => tasksRepo);
-vi.mock('../repository/dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('../repository/quickNotesRepository', () => quickNotesRepo);
 vi.mock('../repository/goalsRepository', () => goalsRepo);
 vi.mock('../repository/targetsRepository', () => targetsRepo);
 
@@ -57,7 +57,7 @@ function localWith(overrides: Partial<AppData> = {}): AppData {
 }
 
 function emptyCloud(): CloudBundle {
-  return { projects: [], tasks: [], dailyNotes: [], goals: [], targets: [] };
+  return { projects: [], tasks: [], quickNotes: [], goals: [], targets: [] };
 }
 
 beforeEach(() => {
@@ -70,7 +70,7 @@ describe('loadCloudBundle', () => {
   it('reads all three entity types and combines them', async () => {
     projectsRepo.listProjects.mockResolvedValue(ok([cloudOnlyProject]));
     tasksRepo.listTasks.mockResolvedValue(ok([]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
 
     const result = await loadCloudBundle();
     expect(result.ok).toBe(true);
@@ -81,7 +81,7 @@ describe('loadCloudBundle', () => {
   it('surfaces the first failure as a typed error', async () => {
     projectsRepo.listProjects.mockResolvedValue(err());
     tasksRepo.listTasks.mockResolvedValue(ok([]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
 
     const result = await loadCloudBundle();
     expect(result.ok).toBe(false);
@@ -96,7 +96,7 @@ describe('compareForLinking', () => {
     const cloud: CloudBundle = {
       projects: [cloudOnlyProject, sharedCloudProject],
       tasks: [],
-      dailyNotes: [],
+      quickNotes: [],
       goals: [],
       targets: [],
     };
@@ -114,7 +114,7 @@ describe('compareForLinking', () => {
     const cloud: CloudBundle = {
       projects: [{ ...sharedLocalProject, updatedAt: '2026-08-30T00:00:00.000Z' }],
       tasks: [],
-      dailyNotes: [],
+      quickNotes: [],
       goals: [],
       targets: [],
     };
@@ -130,8 +130,8 @@ describe('compareForLinking', () => {
 
 describe('buildUseCloudData ("Use my account\'s data")', () => {
   it('replaces local content wholesale with the cloud bundle, stripping updatedAt, and never calls any repository write', () => {
-    const cloud: CloudBundle = { projects: [cloudOnlyProject], tasks: [], dailyNotes: [], goals: [], targets: [] };
-    const result = buildUseCloudData(cloud);
+    const cloud: CloudBundle = { projects: [cloudOnlyProject], tasks: [], quickNotes: [], goals: [], targets: [] };
+    const result = buildUseCloudData(cloud, localWith());
 
     expect(result.projects).toEqual([{ id: 'proj-cloud', name: 'Cloud only', status: 'active' }]);
     expect(projectsRepo.createProject).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
     const cloud: CloudBundle = {
       projects: [cloudOnlyProject, sharedCloudProject],
       tasks: [],
-      dailyNotes: [],
+      quickNotes: [],
       goals: [],
       targets: [],
     };
@@ -173,7 +173,7 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
 
     expect(outcome.deferred.project).toEqual([]);
     expect(outcome.deferred.task).toEqual([]);
-    expect(outcome.deferred.dailyNote).toEqual([]);
+    expect(outcome.deferred.quickNote).toEqual([]);
     expect(outcome.deferred.goal).toEqual([]);
     expect(outcome.deferred.target).toEqual([]);
   });
@@ -184,7 +184,7 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
     );
 
     const local = localWith({ projects: [sharedLocalProject] });
-    const cloud: CloudBundle = { projects: [sharedCloudProject], tasks: [], dailyNotes: [], goals: [], targets: [] };
+    const cloud: CloudBundle = { projects: [sharedCloudProject], tasks: [], quickNotes: [], goals: [], targets: [] };
     const comparison = compareForLinking(local, cloud);
     const metadata = createEmptyAccountMetadata('user-1');
 
@@ -199,7 +199,7 @@ describe('applyKeepLocalData ("Keep this device\'s data")', () => {
     const cloud: CloudBundle = {
       projects: [{ ...sharedLocalProject, updatedAt: '2026-08-30T00:00:00.000Z' }],
       tasks: [],
-      dailyNotes: [],
+      quickNotes: [],
       goals: [],
       targets: [],
     };
@@ -220,7 +220,7 @@ describe('Goals and Targets participate in the explicit-choice flow the same way
   it('loadCloudBundle reads goals and targets alongside the other three entities', async () => {
     projectsRepo.listProjects.mockResolvedValue(ok([]));
     tasksRepo.listTasks.mockResolvedValue(ok([]));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
     goalsRepo.listGoals.mockResolvedValue(ok([cloudOnlyGoal]));
 
     const result = await loadCloudBundle();
@@ -243,7 +243,7 @@ describe('Goals and Targets participate in the explicit-choice flow the same way
 
   it('buildUseCloudData includes goals and targets, stripping updatedAt', () => {
     const cloud: CloudBundle = { ...emptyCloud(), goals: [cloudOnlyGoal] };
-    const result = buildUseCloudData(cloud);
+    const result = buildUseCloudData(cloud, localWith());
     expect(result.goals).toEqual([{ ...localGoal, id: 'goal-cloud', name: 'Cloud goal' }]);
   });
 
@@ -267,5 +267,84 @@ describe('Goals and Targets participate in the explicit-choice flow the same way
     const outcome = await applyKeepLocalData(local, cloud, comparison, createEmptyAccountMetadata('user-1'), 'user-1');
 
     expect(outcome.appData.goals).toEqual([{ ...localGoal, id: 'goal-cloud', name: 'Cloud goal' }]);
+  });
+});
+
+describe('Quick Notes read in isolation from the other four entities', () => {
+  it('loadCloudBundle still succeeds, with the other four entities intact, when Quick Notes alone fails to read', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudOnlyProject]));
+    tasksRepo.listTasks.mockResolvedValue(ok([]));
+    goalsRepo.listGoals.mockResolvedValue(ok([]));
+    targetsRepo.listTargets.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue({ ok: false, error: { type: 'database', message: 'table missing' } });
+
+    const result = await loadCloudBundle();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.projects).toEqual([cloudOnlyProject]);
+    expect(result.data.quickNotes).toEqual([]);
+    expect(result.quickNotesError).toBe('table missing');
+  });
+
+  it('a projects/tasks/goals/targets failure remains a hard failure even when Quick Notes succeeds', async () => {
+    projectsRepo.listProjects.mockResolvedValue(err());
+    tasksRepo.listTasks.mockResolvedValue(ok([]));
+    goalsRepo.listGoals.mockResolvedValue(ok([]));
+    targetsRepo.listTargets.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
+
+    const result = await loadCloudBundle();
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('compareForLinking reports no Quick Notes differences at all when told Quick Notes is unavailable, rather than treating the placeholder empty array as "cloud has none"', () => {
+    const local = localWith({ quickNotes: [{ id: 'n1', text: 'Buy underwear', completed: false, deleted: false, createdAt: 'ts' }] });
+    const cloud: CloudBundle = emptyCloud(); // quickNotes: [] — a placeholder, not real cloud data
+
+    const unavailable = compareForLinking(local, cloud, false);
+    expect(unavailable.localOnly.quickNote).toEqual([]);
+    expect(unavailable.cloudOnly.quickNote).toEqual([]);
+    expect(unavailable.differing.quickNote).toEqual([]);
+
+    // Confirms the contrast: the same inputs, but told Quick Notes *is*
+    // available, correctly report the local note as local-only.
+    const available = compareForLinking(local, cloud, true);
+    expect(available.localOnly.quickNote).toEqual(['n1']);
+  });
+
+  it('buildUseCloudData preserves local Quick Notes, untouched, when told Quick Notes is unavailable — every other entity still replaces from cloud', () => {
+    const localNote = { id: 'n1', text: 'Buy underwear', completed: false, deleted: false, createdAt: 'ts' };
+    const local = localWith({ quickNotes: [localNote] });
+    const cloud: CloudBundle = { ...emptyCloud(), projects: [cloudOnlyProject] };
+
+    const result = buildUseCloudData(cloud, local, false);
+
+    expect(result.quickNotes).toEqual([localNote]);
+    expect(result.projects).toEqual([{ id: 'proj-cloud', name: 'Cloud only', status: 'active' }]);
+  });
+
+  it('buildUseCloudData still replaces Quick Notes from the cloud when Quick Notes is available', () => {
+    const local = localWith({ quickNotes: [{ id: 'stale', text: 'Old', completed: false, deleted: false, createdAt: 'ts' }] });
+    const cloudNote = { id: 'fresh', text: 'From cloud', completed: false, deleted: false, createdAt: 'ts', updatedAt: 'ts' };
+    const cloud: CloudBundle = { ...emptyCloud(), quickNotes: [cloudNote] };
+
+    const result = buildUseCloudData(cloud, local, true);
+
+    expect(result.quickNotes).toEqual([{ id: 'fresh', text: 'From cloud', completed: false, deleted: false, createdAt: 'ts' }]);
+  });
+
+  it('applyKeepLocalData never attempts a Quick Notes write when the comparison reports it unavailable', async () => {
+    const local = localWith({ quickNotes: [{ id: 'n1', text: 'Buy underwear', completed: false, deleted: false, createdAt: 'ts' }] });
+    const cloud: CloudBundle = emptyCloud();
+    const comparison = compareForLinking(local, cloud, false);
+
+    const outcome = await applyKeepLocalData(local, cloud, comparison, createEmptyAccountMetadata('user-1'), 'user-1');
+
+    expect(quickNotesRepo.createQuickNote).not.toHaveBeenCalled();
+    expect(quickNotesRepo.updateQuickNoteGuarded).not.toHaveBeenCalled();
+    // Local Quick Notes are left exactly as they were — not dropped, not duplicated.
+    expect(outcome.appData.quickNotes).toEqual(local.quickNotes);
   });
 });

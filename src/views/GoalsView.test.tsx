@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
     // before regular (non-hoisted) imports evaluate, so calling an imported
     // function here hits a TDZ ("Cannot access '__vi_import_N__' before
     // initialization"). Mirrors ProjectsView.test.tsx's exact fixture shape.
-    current: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] } as AppData,
+    current: { version: 1, tasks: [], projects: [], quickNotes: [], goals: [], targets: [] } as AppData,
     dispatch: vi.fn(),
   },
 }));

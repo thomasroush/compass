@@ -6,13 +6,13 @@ import type { CloudGoal, CloudProject, RepositoryResult } from '../repository/ty
 
 const projectsRepo = vi.hoisted(() => ({ listProjects: vi.fn() }));
 const tasksRepo = vi.hoisted(() => ({ listTasks: vi.fn() }));
-const dailyNotesRepo = vi.hoisted(() => ({ listDailyNotes: vi.fn() }));
+const quickNotesRepo = vi.hoisted(() => ({ listQuickNotes: vi.fn() }));
 const goalsRepo = vi.hoisted(() => ({ listGoals: vi.fn() }));
 const targetsRepo = vi.hoisted(() => ({ listTargets: vi.fn() }));
 
 vi.mock('../repository/projectsRepository', () => projectsRepo);
 vi.mock('../repository/tasksRepository', () => tasksRepo);
-vi.mock('../repository/dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('../repository/quickNotesRepository', () => quickNotesRepo);
 vi.mock('../repository/goalsRepository', () => goalsRepo);
 vi.mock('../repository/targetsRepository', () => targetsRepo);
 
@@ -44,7 +44,7 @@ function localWith(overrides: Partial<AppData> = {}): AppData {
 beforeEach(() => {
   vi.clearAllMocks();
   tasksRepo.listTasks.mockResolvedValue(ok([]));
-  dailyNotesRepo.listDailyNotes.mockResolvedValue(ok([]));
+  quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
   goalsRepo.listGoals.mockResolvedValue(ok([]));
   targetsRepo.listTargets.mockResolvedValue(ok([]));
 });
@@ -201,6 +201,69 @@ describe('refreshFromCloud — returning-device pull', () => {
     const local = localWith();
 
     const result = await refreshFromCloud(local, metadataWith());
+
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('refreshFromCloud — Quick Notes read in isolation from the other four entities', () => {
+  it('still refreshes projects/goals when Quick Notes alone fails to read, and reports quickNotesError', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Home (renamed)' })]));
+    goalsRepo.listGoals.mockResolvedValue(ok([cloudGoal({ name: 'Ship it (renamed)' })]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue({ ok: false, error: { type: 'database', message: 'table missing' } });
+    const local = localWith({ projects: [project], goals: [goal] });
+    let metadata = metadataWith();
+    metadata = setRecordUpdatedAt(metadata, 'project', 'proj-1', '2026-08-29T00:00:00.000Z');
+    metadata = setRecordUpdatedAt(metadata, 'goal', 'goal-1', '2026-08-29T00:00:00.000Z');
+
+    const result = await refreshFromCloud(local, metadata);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changed).toBe(true);
+    expect(result.appData.projects).toEqual([{ id: 'proj-1', name: 'Home (renamed)', status: 'active' }]);
+    expect(result.appData.goals).toEqual([{ ...goal, name: 'Ship it (renamed)' }]);
+    expect(result.quickNotesError).toBe('table missing');
+  });
+
+  it("leaves this device's local Quick Notes exactly as they were when the cloud read fails", async () => {
+    const localNote = { id: 'n1', text: 'Only on this device', completed: false, deleted: false, createdAt: 'ts' };
+    quickNotesRepo.listQuickNotes.mockResolvedValue({ ok: false, error: { type: 'database', message: 'table missing' } });
+    const local = localWith({ quickNotes: [localNote] });
+
+    const result = await refreshFromCloud(local, metadataWith());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.appData.quickNotes).toEqual([localNote]);
+    expect(result.quickNotesError).toBe('table missing');
+  });
+
+  it('a failing Quick Notes read never fails the whole refresh on its own', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue({ ok: false, error: { type: 'database', message: 'table missing' } });
+
+    const result = await refreshFromCloud(localWith(), metadataWith());
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('reports no quickNotesError once Quick Notes reads successfully again', async () => {
+    projectsRepo.listProjects.mockResolvedValue(ok([]));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
+
+    const result = await refreshFromCloud(localWith(), metadataWith());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.quickNotesError).toBeUndefined();
+  });
+
+  it('a projects/tasks/goals/targets failure remains a hard failure even when Quick Notes succeeds', async () => {
+    projectsRepo.listProjects.mockResolvedValue(err());
+    quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
+
+    const result = await refreshFromCloud(localWith(), metadataWith());
 
     expect(result.ok).toBe(false);
   });

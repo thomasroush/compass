@@ -42,7 +42,10 @@ export function classifyActionProvenance(action: AppAction): ActionProvenance {
     case 'REORDER_TASK':
     case 'ADD_PROJECT':
     case 'UPDATE_PROJECT':
-    case 'UPSERT_DAILY_NOTE':
+    case 'ADD_QUICK_NOTE':
+    case 'COMPLETE_QUICK_NOTE':
+    case 'UNCOMPLETE_QUICK_NOTE':
+    case 'DELETE_QUICK_NOTE':
     case 'ADD_GOAL':
     case 'UPDATE_GOAL':
     case 'LINK_GOAL_PROJECT':
@@ -82,7 +85,7 @@ export interface DirtyTarget {
  * (no id/timestamp generation) — reusing it directly here is not "calling
  * the reducer speculatively" in the sense that matters (that concern is
  * specifically about `appReducer` itself, whose `ADD_TASK`/`ADD_PROJECT`/
- * `UPSERT_DAILY_NOTE` cases generate a fresh id/timestamp on every call, so
+ * `ADD_QUICK_NOTE` cases generate a fresh id/timestamp on every call, so
  * calling it twice for the same dispatch would silently produce two
  * different records — see AppContext.tsx). It is the single source of truth
  * for the demotion rule (which of more-than-3 primaries survive), so
@@ -252,13 +255,16 @@ export function resolveDirtyTargets(action: AppAction, prevState: AppData): Dirt
       return exists ? [{ entity: 'project', id: action.id }] : [];
     }
 
-    case 'UPSERT_DAILY_NOTE': {
-      const existing = prevState.dailyNotes.find((n) => n.date === action.date);
-      if (existing) return [{ entity: 'dailyNote', id: existing.id }];
-      const morning = action.morning ?? '';
-      const evening = action.evening ?? '';
-      if ((!morning.trim() && !evening.trim()) || !action.id) return [];
-      return [{ entity: 'dailyNote', id: action.id }];
+    case 'ADD_QUICK_NOTE': {
+      if (!action.text.trim() || !action.id) return [];
+      return [{ entity: 'quickNote', id: action.id }];
+    }
+
+    case 'COMPLETE_QUICK_NOTE':
+    case 'UNCOMPLETE_QUICK_NOTE':
+    case 'DELETE_QUICK_NOTE': {
+      const exists = prevState.quickNotes.some((n) => n.id === action.id && !n.deleted);
+      return exists ? [{ entity: 'quickNote', id: action.id }] : [];
     }
 
     case 'ADD_GOAL': {

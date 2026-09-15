@@ -7,7 +7,7 @@ import { getAccountMetadata } from '../sync/metadata';
 import { loadSyncMetadataStore } from '../sync/metadataStorage';
 
 const appState = vi.hoisted(() => ({
-  current: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] } as AppData,
+  current: { version: 1, tasks: [], projects: [], quickNotes: [], goals: [], targets: [] } as AppData,
   dispatch: vi.fn(),
 }));
 const authState = vi.hoisted(() => ({
@@ -47,7 +47,9 @@ function seedLocalData(): AppData {
         archived: false,
       },
     ],
-    dailyNotes: [{ id: 'n1', date: '2026-08-30', morning: 'Plan', evening: 'Review' }],
+    quickNotes: [
+      { id: 'n1', text: 'Buy underwear', completed: false, deleted: false, createdAt: '2026-08-30T00:00:00.000Z' },
+    ],
   };
 }
 
@@ -61,7 +63,7 @@ beforeEach(() => {
   migration.countLocalData.mockImplementation((local: AppData) => ({
     projects: local.projects.length,
     tasks: local.tasks.length,
-    dailyNotes: local.dailyNotes.length,
+    quickNotes: local.quickNotes.length,
   }));
 });
 
@@ -91,7 +93,7 @@ describe('MigrationPanel — no migration without explicit confirmation', () => 
     authState.user = { id: 'account-1', email: 'person@example.com' };
     migration.getCloudCounts.mockResolvedValue({
       ok: true,
-      data: { projects: 0, tasks: 0, dailyNotes: 0 },
+      data: { projects: 0, tasks: 0, quickNotes: 0 },
     });
 
     render(<MigrationPanel />);
@@ -109,16 +111,16 @@ describe('MigrationPanel — no migration without explicit confirmation', () => 
     authState.user = { id: 'account-1', email: 'person@example.com' };
     migration.getCloudCounts.mockResolvedValue({
       ok: true,
-      data: { projects: 2, tasks: 3, dailyNotes: 1 },
+      data: { projects: 2, tasks: 3, quickNotes: 1 },
     });
     migration.runMigration.mockResolvedValue({
       ok: true,
-      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
-      uploaded: { projects: 1, tasks: 1, dailyNotes: 1 },
+      attempted: { projects: 1, tasks: 1, quickNotes: 1 },
+      uploaded: { projects: 1, tasks: 1, quickNotes: 1 },
       uploadFailures: [],
       verification: {
         passed: true,
-        cloudCountsAfter: { projects: 3, tasks: 4, dailyNotes: 2 },
+        cloudCountsAfter: { projects: 3, tasks: 4, quickNotes: 2 },
         issues: [],
       },
     });
@@ -143,7 +145,7 @@ describe('MigrationPanel — reporting outcomes', () => {
     authState.user = { id: 'account-1', email: 'person@example.com' };
     migration.getCloudCounts.mockResolvedValue({
       ok: true,
-      data: { projects: 0, tasks: 0, dailyNotes: 0 },
+      data: { projects: 0, tasks: 0, quickNotes: 0 },
     });
     render(<MigrationPanel />);
     fireEvent.click(screen.getByRole('button', { name: /Migrate this device/i }));
@@ -154,14 +156,14 @@ describe('MigrationPanel — reporting outcomes', () => {
   it('reports partial upload failures clearly, and does not claim success', async () => {
     migration.runMigration.mockResolvedValue({
       ok: false,
-      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
-      uploaded: { projects: 1, tasks: 0, dailyNotes: 1 },
+      attempted: { projects: 1, tasks: 1, quickNotes: 1 },
+      uploaded: { projects: 1, tasks: 0, quickNotes: 1 },
       uploadFailures: [
         { entity: 'task', id: 't1', label: 'Buy milk', message: 'violates foreign key constraint' },
       ],
       verification: {
         passed: true,
-        cloudCountsAfter: { projects: 1, tasks: 0, dailyNotes: 1 },
+        cloudCountsAfter: { projects: 1, tasks: 0, quickNotes: 1 },
         issues: [],
       },
     });
@@ -176,12 +178,12 @@ describe('MigrationPanel — reporting outcomes', () => {
   it('reports verification failures clearly, and does not claim success', async () => {
     migration.runMigration.mockResolvedValue({
       ok: false,
-      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
-      uploaded: { projects: 1, tasks: 1, dailyNotes: 1 },
+      attempted: { projects: 1, tasks: 1, quickNotes: 1 },
+      uploaded: { projects: 1, tasks: 1, quickNotes: 1 },
       uploadFailures: [],
       verification: {
         passed: false,
-        cloudCountsAfter: { projects: 1, tasks: 0, dailyNotes: 1 },
+        cloudCountsAfter: { projects: 1, tasks: 0, quickNotes: 1 },
         issues: [
           { entity: 'task', id: 't1', label: 'Buy milk', reason: 'not found in Supabase after migration' },
         ],
@@ -198,8 +200,8 @@ describe('MigrationPanel — reporting outcomes', () => {
   it('reports an authentication failure without claiming any upload happened', async () => {
     migration.runMigration.mockResolvedValue({
       ok: false,
-      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
-      uploaded: { projects: 0, tasks: 0, dailyNotes: 0 },
+      attempted: { projects: 1, tasks: 1, quickNotes: 1 },
+      uploaded: { projects: 0, tasks: 0, quickNotes: 0 },
       uploadFailures: [],
       verification: null,
       authError: 'You must be signed in to access cloud data.',
@@ -218,16 +220,16 @@ describe('MigrationPanel — local data retained', () => {
     authState.user = { id: 'account-1', email: 'person@example.com' };
     migration.getCloudCounts.mockResolvedValue({
       ok: true,
-      data: { projects: 0, tasks: 0, dailyNotes: 0 },
+      data: { projects: 0, tasks: 0, quickNotes: 0 },
     });
     migration.runMigration.mockResolvedValue({
       ok: true,
-      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
-      uploaded: { projects: 1, tasks: 1, dailyNotes: 1 },
+      attempted: { projects: 1, tasks: 1, quickNotes: 1 },
+      uploaded: { projects: 1, tasks: 1, quickNotes: 1 },
       uploadFailures: [],
       verification: {
         passed: true,
-        cloudCountsAfter: { projects: 1, tasks: 1, dailyNotes: 1 },
+        cloudCountsAfter: { projects: 1, tasks: 1, quickNotes: 1 },
         issues: [],
       },
     });
@@ -246,13 +248,13 @@ describe('MigrationPanel — local data retained', () => {
 describe('MigrationPanel — account linking (Risk 2)', () => {
   it('marks this device linked to the account once migration completes and is fully verified', async () => {
     authState.user = { id: 'account-1', email: 'person@example.com' };
-    migration.getCloudCounts.mockResolvedValue({ ok: true, data: { projects: 0, tasks: 0, dailyNotes: 0 } });
+    migration.getCloudCounts.mockResolvedValue({ ok: true, data: { projects: 0, tasks: 0, quickNotes: 0 } });
     migration.runMigration.mockResolvedValue({
       ok: true,
-      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
-      uploaded: { projects: 1, tasks: 1, dailyNotes: 1 },
+      attempted: { projects: 1, tasks: 1, quickNotes: 1 },
+      uploaded: { projects: 1, tasks: 1, quickNotes: 1 },
       uploadFailures: [],
-      verification: { passed: true, cloudCountsAfter: { projects: 1, tasks: 1, dailyNotes: 1 }, issues: [] },
+      verification: { passed: true, cloudCountsAfter: { projects: 1, tasks: 1, quickNotes: 1 }, issues: [] },
     });
 
     expect(getAccountMetadata(loadSyncMetadataStore(), 'account-1').established).toBe(false);
@@ -268,15 +270,15 @@ describe('MigrationPanel — account linking (Risk 2)', () => {
 
   it('does not mark this device linked when migration reports a partial failure', async () => {
     authState.user = { id: 'account-1', email: 'person@example.com' };
-    migration.getCloudCounts.mockResolvedValue({ ok: true, data: { projects: 0, tasks: 0, dailyNotes: 0 } });
+    migration.getCloudCounts.mockResolvedValue({ ok: true, data: { projects: 0, tasks: 0, quickNotes: 0 } });
     migration.runMigration.mockResolvedValue({
       ok: false,
-      attempted: { projects: 1, tasks: 1, dailyNotes: 1 },
-      uploaded: { projects: 1, tasks: 0, dailyNotes: 1 },
+      attempted: { projects: 1, tasks: 1, quickNotes: 1 },
+      uploaded: { projects: 1, tasks: 0, quickNotes: 1 },
       uploadFailures: [
         { entity: 'task', id: 't1', label: 'Buy milk', message: 'violates foreign key constraint' },
       ],
-      verification: { passed: true, cloudCountsAfter: { projects: 1, tasks: 0, dailyNotes: 1 }, issues: [] },
+      verification: { passed: true, cloudCountsAfter: { projects: 1, tasks: 0, quickNotes: 1 }, issues: [] },
     });
 
     render(<MigrationPanel />);

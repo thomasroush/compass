@@ -13,7 +13,8 @@ import {
   appReducer,
   countPrimaryTodayTasks,
   createTaskForTest,
-  getDailyNoteForDate,
+  getActiveQuickNotes,
+  getRecentlyCompletedQuickNotes,
 } from '../store/reducer';
 import { createEmptyAppData, STORAGE_KEY, type AppData } from '../types';
 
@@ -25,7 +26,9 @@ function sampleData(): AppData {
       createTaskForTest({ id: 't2', title: 'Second', status: 'Today', sortOrder: 1, isPrimary: true }),
     ],
     projects: [{ id: 'p1', name: 'Home', status: 'active' }],
-    dailyNotes: [{ id: 'n1', date: '2026-08-28', morning: 'Focus', evening: 'Done' }],
+    quickNotes: [
+      { id: 'n1', text: 'Buy underwear', completed: false, deleted: false, createdAt: '2026-08-28T00:00:00.000Z' },
+    ],
     // validateAppData now always normalizes goals/targets to [] when absent
     // (backward compatibility with pre-Goals/Targets backups) — included
     // here explicitly so round-trips through parseJsonAppData compare equal.
@@ -108,91 +111,124 @@ describe('primary task cap', () => {
   });
 });
 
-describe('daily notes', () => {
-  it('persist by date', () => {
+describe('quick notes', () => {
+  it('adds a note to the active list', () => {
     let state = createEmptyAppData();
-    state = appReducer(state, {
-      type: 'UPSERT_DAILY_NOTE',
-      date: '2026-08-28',
-      morning: 'Plan day',
-      evening: 'Review',
-    });
+    state = appReducer(state, { type: 'ADD_QUICK_NOTE', text: 'Buy underwear' });
 
-    const note = getDailyNoteForDate(state.dailyNotes, '2026-08-28');
-    expect(note?.morning).toBe('Plan day');
-    expect(note?.evening).toBe('Review');
-
-    state = appReducer(state, {
-      type: 'UPSERT_DAILY_NOTE',
-      date: '2026-08-28',
-      evening: 'Updated',
-    });
-    expect(getDailyNoteForDate(state.dailyNotes, '2026-08-28')?.evening).toBe('Updated');
+    const active = getActiveQuickNotes(state.quickNotes);
+    expect(active).toHaveLength(1);
+    expect(active[0].text).toBe('Buy underwear');
+    expect(active[0].completed).toBe(false);
+    expect(active[0].deleted).toBe(false);
   });
 
-  it('does not create a record for a blank upsert with no existing note (e.g. visiting Daily Notes without typing)', () => {
+  it('shows active notes newest-first, by createdAt', () => {
+    // Constructed directly (not via ADD_QUICK_NOTE) so the two createdAt
+    // timestamps are guaranteed distinct, unlike two reducer calls that can
+    // land in the same millisecond.
+    const state: AppData = {
+      ...createEmptyAppData(),
+      quickNotes: [
+        { id: 'n1', text: 'Buy underwear', completed: false, deleted: false, createdAt: '2026-09-07T00:00:00.000Z' },
+        {
+          id: 'n2',
+          text: 'Add idea to pitch deck',
+          completed: false,
+          deleted: false,
+          createdAt: '2026-09-07T00:00:05.000Z',
+        },
+      ],
+    };
+
+    const active = getActiveQuickNotes(state.quickNotes);
+    expect(active.map((n) => n.text)).toEqual(['Add idea to pitch deck', 'Buy underwear']);
+  });
+
+  it('does not create a record for a blank or whitespace-only add', () => {
     const before = createEmptyAppData();
-    const state = appReducer(before, {
-      type: 'UPSERT_DAILY_NOTE',
-      date: '2026-08-31',
-      morning: '',
-      evening: '',
-    });
-
+    let state = appReducer(before, { type: 'ADD_QUICK_NOTE', text: '' });
     expect(state).toBe(before);
-    expect(getDailyNoteForDate(state.dailyNotes, '2026-08-31')).toBeUndefined();
-    expect(state.dailyNotes).toHaveLength(0);
-  });
-
-  it('does not create a record for a whitespace-only upsert with no existing note', () => {
-    const before = createEmptyAppData();
-    const state = appReducer(before, {
-      type: 'UPSERT_DAILY_NOTE',
-      date: '2026-08-31',
-      morning: '   ',
-      evening: '\n\t ',
-    });
-
+    state = appReducer(before, { type: 'ADD_QUICK_NOTE', text: '   ' });
     expect(state).toBe(before);
-    expect(state.dailyNotes).toHaveLength(0);
+    expect(state.quickNotes).toHaveLength(0);
   });
 
-  it('still creates a record normally when the upsert has real content', () => {
-    const state = appReducer(createEmptyAppData(), {
-      type: 'UPSERT_DAILY_NOTE',
-      date: '2026-08-31',
-      morning: 'Went for a run',
-      evening: '',
-    });
+  it('completing a note removes it from the active list and surfaces it in recently completed', () => {
+    let state = appReducer(createEmptyAppData(), { type: 'ADD_QUICK_NOTE', text: 'Buy underwear' });
+    const id = state.quickNotes[0].id;
 
-    const note = getDailyNoteForDate(state.dailyNotes, '2026-08-31');
-    expect(note).toBeDefined();
-    expect(note?.morning).toBe('Went for a run');
-    expect(note?.evening).toBe('');
+    state = appReducer(state, { type: 'COMPLETE_QUICK_NOTE', id });
+
+    expect(getActiveQuickNotes(state.quickNotes)).toHaveLength(0);
+    const completed = getRecentlyCompletedQuickNotes(state.quickNotes);
+    expect(completed).toHaveLength(1);
+    expect(completed[0].completed).toBe(true);
+    expect(completed[0].completedAt).toBeTruthy();
   });
 
-  it('still allows clearing an existing note back to blank, without restoring or deleting it', () => {
-    let state = appReducer(createEmptyAppData(), {
-      type: 'UPSERT_DAILY_NOTE',
-      date: '2026-08-31',
-      morning: 'Went for a run',
-      evening: 'Read a book',
-    });
-    expect(state.dailyNotes).toHaveLength(1);
+  it('recently completed only shows notes completed within the last 7 days', () => {
+    let state = appReducer(createEmptyAppData(), { type: 'ADD_QUICK_NOTE', text: 'Old one' });
+    const id = state.quickNotes[0].id;
+    state = appReducer(state, { type: 'COMPLETE_QUICK_NOTE', id });
+    const completedAt = new Date(state.quickNotes[0].completedAt!).getTime();
 
-    state = appReducer(state, {
-      type: 'UPSERT_DAILY_NOTE',
-      date: '2026-08-31',
-      morning: '',
-      evening: '',
-    });
+    const sixDaysLater = completedAt + 6 * 24 * 60 * 60 * 1000;
+    const eightDaysLater = completedAt + 8 * 24 * 60 * 60 * 1000;
 
-    // The existing record is updated in place (cleared), not deleted and not
-    // left holding its old text.
-    expect(state.dailyNotes).toHaveLength(1);
-    const note = getDailyNoteForDate(state.dailyNotes, '2026-08-31');
-    expect(note?.morning).toBe('');
-    expect(note?.evening).toBe('');
+    expect(getRecentlyCompletedQuickNotes(state.quickNotes, sixDaysLater)).toHaveLength(1);
+    expect(getRecentlyCompletedQuickNotes(state.quickNotes, eightDaysLater)).toHaveLength(0);
+  });
+
+  it('reopening a completed note (uncomplete) returns it to the active list', () => {
+    let state = appReducer(createEmptyAppData(), { type: 'ADD_QUICK_NOTE', text: 'Buy underwear' });
+    const id = state.quickNotes[0].id;
+    state = appReducer(state, { type: 'COMPLETE_QUICK_NOTE', id });
+    state = appReducer(state, { type: 'UNCOMPLETE_QUICK_NOTE', id });
+
+    expect(getActiveQuickNotes(state.quickNotes)).toHaveLength(1);
+    expect(getRecentlyCompletedQuickNotes(state.quickNotes)).toHaveLength(0);
+    expect(state.quickNotes[0].completedAt).toBeUndefined();
+  });
+
+  it('deleting a note (from either list) removes it from both, permanently', () => {
+    let state = appReducer(createEmptyAppData(), { type: 'ADD_QUICK_NOTE', text: 'Buy underwear' });
+    const id = state.quickNotes[0].id;
+
+    state = appReducer(state, { type: 'DELETE_QUICK_NOTE', id });
+
+    expect(getActiveQuickNotes(state.quickNotes)).toHaveLength(0);
+    expect(getRecentlyCompletedQuickNotes(state.quickNotes)).toHaveLength(0);
+    // Soft-deleted for sync purposes (never truly vanishes from the array),
+    // matching this app's existing archive-not-delete model, but is excluded
+    // from every read path.
+    expect(state.quickNotes.find((n) => n.id === id)?.deleted).toBe(true);
+  });
+
+  it('deleting a completed note removes it from the recently-completed section', () => {
+    let state = appReducer(createEmptyAppData(), { type: 'ADD_QUICK_NOTE', text: 'Buy underwear' });
+    const id = state.quickNotes[0].id;
+    state = appReducer(state, { type: 'COMPLETE_QUICK_NOTE', id });
+    state = appReducer(state, { type: 'DELETE_QUICK_NOTE', id });
+
+    expect(getRecentlyCompletedQuickNotes(state.quickNotes)).toHaveLength(0);
+  });
+
+  it('a nonexistent or already-deleted id is a no-op for complete/uncomplete/delete', () => {
+    const before = appReducer(createEmptyAppData(), { type: 'ADD_QUICK_NOTE', text: 'Buy underwear' });
+    const missing = 'does-not-exist';
+
+    expect(appReducer(before, { type: 'COMPLETE_QUICK_NOTE', id: missing })).toBe(before);
+    expect(appReducer(before, { type: 'UNCOMPLETE_QUICK_NOTE', id: missing })).toBe(before);
+    expect(appReducer(before, { type: 'DELETE_QUICK_NOTE', id: missing })).toBe(before);
+  });
+
+  it('persists through save/load like any other AppData field', () => {
+    const state = appReducer(createEmptyAppData(), { type: 'ADD_QUICK_NOTE', text: 'Buy underwear' });
+    resetMemoryStore();
+    clearAppData();
+    saveAppData(state);
+    expect(loadAppData()).toEqual(state);
   });
 });
 
@@ -220,31 +256,18 @@ describe('reducer id pass-through and APPLY_REMOTE_UPDATE (Phase 5B3A scaffold)'
     expect(state.projects[0].id).toBe('preset-project-id');
   });
 
-  it('UPSERT_DAILY_NOTE uses a caller-supplied id for a new note, when given', () => {
+  it('ADD_QUICK_NOTE uses a caller-supplied id instead of generating one, when given', () => {
     const state = appReducer(createEmptyAppData(), {
-      type: 'UPSERT_DAILY_NOTE',
+      type: 'ADD_QUICK_NOTE',
       id: 'preset-note-id',
-      date: '2026-09-01',
-      morning: 'Plan',
+      text: 'Buy underwear',
     });
-    expect(state.dailyNotes[0].id).toBe('preset-note-id');
+    expect(state.quickNotes[0].id).toBe('preset-note-id');
   });
 
-  it('UPSERT_DAILY_NOTE ignores a caller-supplied id when updating an existing note (keeps the existing id)', () => {
-    let state = appReducer(createEmptyAppData(), {
-      type: 'UPSERT_DAILY_NOTE',
-      id: 'first-id',
-      date: '2026-09-01',
-      morning: 'Plan',
-    });
-    state = appReducer(state, {
-      type: 'UPSERT_DAILY_NOTE',
-      id: 'a-different-id-that-should-be-ignored',
-      date: '2026-09-01',
-      evening: 'Review',
-    });
-    expect(state.dailyNotes).toHaveLength(1);
-    expect(state.dailyNotes[0].id).toBe('first-id');
+  it('ADD_QUICK_NOTE still generates its own id when none is supplied', () => {
+    const state = appReducer(createEmptyAppData(), { type: 'ADD_QUICK_NOTE', text: 'Buy underwear' });
+    expect(state.quickNotes[0].id).toBeTruthy();
   });
 
   it('APPLY_REMOTE_UPDATE replaces state wholesale, exactly like LOAD/IMPORT', () => {
@@ -278,7 +301,7 @@ describe('validation', () => {
   it('rejects invalid imported data', () => {
     expect(parseJsonAppData('not json').ok).toBe(false);
     expect(validateAppData({ version: 2 }).ok).toBe(false);
-    expect(validateAppData({ version: 1, tasks: 'bad', projects: [], dailyNotes: [] }).ok).toBe(
+    expect(validateAppData({ version: 1, tasks: 'bad', projects: [], quickNotes: [] }).ok).toBe(
       false,
     );
   });

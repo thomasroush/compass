@@ -55,7 +55,7 @@ describe('sync metadata storage', () => {
   });
 
   it('is not touched when AppData is saved under its own key', () => {
-    getStorage().setItem(STORAGE_KEY, JSON.stringify({ version: 1, tasks: [], projects: [], dailyNotes: [] }));
+    getStorage().setItem(STORAGE_KEY, JSON.stringify({ version: 1, tasks: [], projects: [], quickNotes: [] }));
     expect(loadSyncMetadataStore()).toEqual(createEmptySyncMetadataStore());
   });
 
@@ -63,7 +63,7 @@ describe('sync metadata storage', () => {
     let store = createEmptySyncMetadataStore();
     store = upsertAccountMetadata(store, createEmptyAccountMetadata('acct-1'));
     saveSyncMetadataStore(store);
-    const appDataJson = JSON.stringify({ version: 1, tasks: [], projects: [], dailyNotes: [] });
+    const appDataJson = JSON.stringify({ version: 1, tasks: [], projects: [], quickNotes: [] });
     getStorage().setItem(STORAGE_KEY, appDataJson);
 
     clearSyncMetadataStore();

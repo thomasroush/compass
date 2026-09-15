@@ -1,10 +1,10 @@
 import {
   AppData,
-  DailyNote,
   Goal,
   GoalStatus,
   Priority,
   Project,
+  QuickNote,
   Target,
   TargetValueFormat,
   Task,
@@ -188,8 +188,27 @@ export function formatTargetValue(value: number, target: Extract<Target, { type:
   return target.unit ? `${display} ${target.unit}` : display;
 }
 
-export function getDailyNoteForDate(notes: DailyNote[], date: string): DailyNote | undefined {
-  return notes.find((n) => n.date === date);
+/** Unfinished Quick Notes, newest first. Deleted notes never appear here. */
+export function getActiveQuickNotes(notes: QuickNote[]): QuickNote[] {
+  return notes
+    .filter((n) => !n.deleted && !n.completed)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+const RECENTLY_COMPLETED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Completed Quick Notes from the last 7 days, newest-completed first, for
+ * the collapsed "Recently completed" section. A note completed longer ago
+ * simply stops appearing here — it isn't deleted, just no longer surfaced;
+ * only an explicit delete removes it. `now` is injectable for deterministic
+ * tests.
+ */
+export function getRecentlyCompletedQuickNotes(notes: QuickNote[], now = Date.now()): QuickNote[] {
+  return notes
+    .filter((n) => !n.deleted && n.completed && n.completedAt)
+    .filter((n) => now - new Date(n.completedAt!).getTime() <= RECENTLY_COMPLETED_WINDOW_MS)
+    .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
 }
 
 export function countPrimaryTodayTasks(tasks: Task[]): number {
@@ -282,7 +301,10 @@ export type AppAction =
       /** `undefined` leaves it unchanged; `null` clears it back to unranked. */
       priorityRank?: number | null;
     }
-  | { type: 'UPSERT_DAILY_NOTE'; id?: string; date: string; morning?: string; evening?: string }
+  | { type: 'ADD_QUICK_NOTE'; id?: string; text: string }
+  | { type: 'COMPLETE_QUICK_NOTE'; id: string }
+  | { type: 'UNCOMPLETE_QUICK_NOTE'; id: string }
+  | { type: 'DELETE_QUICK_NOTE'; id: string }
   | { type: 'ADD_GOAL'; id?: string; name: string; description?: string; dueDate?: string; priority?: Priority }
   | {
       type: 'UPDATE_GOAL';
@@ -522,40 +544,48 @@ export function appReducer(state: AppData, action: AppAction): AppData {
         ),
       };
 
-    case 'UPSERT_DAILY_NOTE': {
-      const existing = state.dailyNotes.find((n) => n.date === action.date);
-      if (existing) {
-        // Clearing an existing note back to blank is a legitimate edit and
-        // must stay possible here — only creating a new, still-blank record
-        // below is refused.
-        return {
-          ...state,
-          dailyNotes: state.dailyNotes.map((n) =>
-            n.date === action.date
-              ? {
-                  ...n,
-                  morning: action.morning ?? n.morning,
-                  evening: action.evening ?? n.evening,
-                }
-              : n,
-          ),
-        };
-      }
-      const morning = action.morning ?? '';
-      const evening = action.evening ?? '';
-      // A blank/whitespace-only save with nothing to attach it to (e.g.
-      // DailyNotesView's autosave firing on mount before the user has typed
-      // anything) must not create a record — an empty note is indistinguishable
-      // from no note in the UI, so silently persisting one has no benefit and
-      // only pollutes local data (and, in turn, cloud-hydration decisions).
-      if (!morning.trim() && !evening.trim()) return state;
-      const note: DailyNote = {
+    case 'ADD_QUICK_NOTE': {
+      const text = action.text.trim();
+      if (!text) return state;
+      const note: QuickNote = {
         id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
-        date: action.date,
-        morning,
-        evening,
+        text,
+        completed: false,
+        deleted: false,
+        createdAt: new Date().toISOString(),
       };
-      return { ...state, dailyNotes: [...state.dailyNotes, note] };
+      return { ...state, quickNotes: [...state.quickNotes, note] };
+    }
+
+    case 'COMPLETE_QUICK_NOTE': {
+      const exists = state.quickNotes.some((n) => n.id === action.id && !n.deleted);
+      if (!exists) return state;
+      return {
+        ...state,
+        quickNotes: state.quickNotes.map((n) =>
+          n.id === action.id ? { ...n, completed: true, completedAt: new Date().toISOString() } : n,
+        ),
+      };
+    }
+
+    case 'UNCOMPLETE_QUICK_NOTE': {
+      const exists = state.quickNotes.some((n) => n.id === action.id && !n.deleted);
+      if (!exists) return state;
+      return {
+        ...state,
+        quickNotes: state.quickNotes.map((n) =>
+          n.id === action.id ? { ...n, completed: false, completedAt: undefined } : n,
+        ),
+      };
+    }
+
+    case 'DELETE_QUICK_NOTE': {
+      const exists = state.quickNotes.some((n) => n.id === action.id && !n.deleted);
+      if (!exists) return state;
+      return {
+        ...state,
+        quickNotes: state.quickNotes.map((n) => (n.id === action.id ? { ...n, deleted: true } : n)),
+      };
     }
 
     case 'ADD_GOAL': {
@@ -698,7 +728,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
       return action.data;
 
     case 'RESET':
-      return { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] };
+      return { version: 1, tasks: [], projects: [], quickNotes: [], goals: [], targets: [] };
 
     case 'APPLY_REMOTE_UPDATE':
       return action.data;

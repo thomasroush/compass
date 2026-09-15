@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   // an imported function here would throw a TDZ ReferenceError. The real
   // value is set in beforeEach below, once imports are available.
   appState: {
-    current: { version: 1, tasks: [], projects: [], dailyNotes: [], goals: [], targets: [] } as AppData,
+    current: { version: 1, tasks: [], projects: [], quickNotes: [], goals: [], targets: [] } as AppData,
     dispatch: vi.fn(),
   },
   authState: { isSupabaseConfigured: true, user: null as { id: string; email: string } | null },
@@ -139,7 +139,7 @@ describe('SettingsView — Import (signed in): decision 10 explicit choice', () 
   });
 
   it('"This device and my account" imports locally and also pushes the result to the cloud, marking this device established', async () => {
-    mocks.migration.runMigration.mockResolvedValue({ ok: true, uploaded: { projects: 1, tasks: 0, dailyNotes: 0 }, uploadFailures: [] });
+    mocks.migration.runMigration.mockResolvedValue({ ok: true, uploaded: { projects: 1, tasks: 0, quickNotes: 0 }, uploadFailures: [] });
     render(<SettingsView />);
     await chooseFile();
     fireEvent.click(await screen.findByRole('button', { name: /This device and my account/ }));

@@ -18,6 +18,7 @@ function state(overrides: Partial<CloudSyncState>): CloudSyncState {
     message: null,
     localCounts: null,
     cloudCounts: null,
+    quickNotesError: null,
     retry: vi.fn(),
     refreshAcceptingServer: vi.fn(),
     ...overrides,

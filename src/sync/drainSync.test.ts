@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { AppData, DailyNote, Goal, Project, Target, Task } from '../types';
+import type { AppData, QuickNote, Goal, Project, Target, Task } from '../types';
 import { createEmptyAppData } from '../types';
 import type {
-  CloudDailyNote,
+  CloudQuickNote,
   CloudGoal,
   CloudProject,
   CloudTarget,
@@ -29,10 +29,10 @@ const tasksRepo = vi.hoisted(() => ({
   updateTaskGuarded: vi.fn(),
   listTasks: vi.fn(),
 }));
-const dailyNotesRepo = vi.hoisted(() => ({
-  createDailyNote: vi.fn(),
-  updateDailyNoteGuarded: vi.fn(),
-  listDailyNotes: vi.fn(),
+const quickNotesRepo = vi.hoisted(() => ({
+  createQuickNote: vi.fn(),
+  updateQuickNoteGuarded: vi.fn(),
+  listQuickNotes: vi.fn(),
 }));
 const goalsRepo = vi.hoisted(() => ({
   createGoal: vi.fn(),
@@ -47,7 +47,7 @@ const targetsRepo = vi.hoisted(() => ({
 
 vi.mock('../repository/projectsRepository', () => projectsRepo);
 vi.mock('../repository/tasksRepository', () => tasksRepo);
-vi.mock('../repository/dailyNotesRepository', () => dailyNotesRepo);
+vi.mock('../repository/quickNotesRepository', () => quickNotesRepo);
 vi.mock('../repository/goalsRepository', () => goalsRepo);
 vi.mock('../repository/targetsRepository', () => targetsRepo);
 
@@ -84,10 +84,17 @@ function project(overrides: Partial<Project> = {}): Project {
 function cloudProject(base: Project = project(), overrides: Partial<CloudProject> = {}): CloudProject {
   return { ...base, updatedAt: '2026-09-01T01:00:00.000Z', ...overrides };
 }
-function note(overrides: Partial<DailyNote> = {}): DailyNote {
-  return { id: 'n1', date: '2026-09-01', morning: 'Plan', evening: '', ...overrides };
+function note(overrides: Partial<QuickNote> = {}): QuickNote {
+  return {
+    id: 'n1',
+    text: 'Buy underwear',
+    completed: false,
+    deleted: false,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    ...overrides,
+  };
 }
-function cloudNote(base: DailyNote = note(), overrides: Partial<CloudDailyNote> = {}): CloudDailyNote {
+function cloudNote(base: QuickNote = note(), overrides: Partial<CloudQuickNote> = {}): CloudQuickNote {
   return { ...base, updatedAt: '2026-09-01T01:00:00.000Z', ...overrides };
 }
 function goal(overrides: Partial<Goal> = {}): Goal {
@@ -147,17 +154,17 @@ describe('drainDirtyWork — create path (unknown record)', () => {
     expect(meta.records.task[t.id]?.lastKnownUpdatedAt).toBe(cloudTask(t).updatedAt);
   });
 
-  it('creates a new project and a new daily note, each with the exact accountId', async () => {
+  it('creates a new project and a new quick note, each with the exact accountId', async () => {
     const p = project();
     const n = note();
-    dirtyMetadata((m) => markDirty(markDirty(m, 'project', p.id), 'dailyNote', n.id));
+    dirtyMetadata((m) => markDirty(markDirty(m, 'project', p.id), 'quickNote', n.id));
     projectsRepo.createProject.mockResolvedValue(ok(cloudProject(p)));
-    dailyNotesRepo.createDailyNote.mockResolvedValue(ok(cloudNote(n)));
+    quickNotesRepo.createQuickNote.mockResolvedValue(ok(cloudNote(n)));
 
-    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [p], dailyNotes: [n] }));
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [p], quickNotes: [n] }));
 
     expect(projectsRepo.createProject).toHaveBeenCalledWith(p, ACCOUNT);
-    expect(dailyNotesRepo.createDailyNote).toHaveBeenCalledWith(n, ACCOUNT);
+    expect(quickNotesRepo.createQuickNote).toHaveBeenCalledWith(n, ACCOUNT);
   });
 });
 
@@ -425,7 +432,7 @@ describe('drainDirtyWork — duplicate-create resolution (Risk 1)', () => {
     expect(meta.records.task[t.id]).toBeUndefined();
   });
 
-  it('applies the same identical-content-safe / different-content-conflict resolution for projects and daily notes', async () => {
+  it('applies the same identical-content-safe / different-content-conflict resolution for projects and quick notes', async () => {
     const p = project({ name: 'Home' });
     dirtyMetadata((m) => markDirty(m, 'project', p.id));
     projectsRepo.createProject.mockResolvedValue(err('duplicate', 'duplicate key'));
@@ -434,14 +441,14 @@ describe('drainDirtyWork — duplicate-create resolution (Risk 1)', () => {
     const projectResult = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [p] }));
     expect(projectResult.outcomes).toEqual([{ kind: 'synced' }]);
 
-    const n = note({ morning: 'Plan' });
-    dirtyMetadata((m) => markDirty(m, 'dailyNote', n.id));
-    dailyNotesRepo.createDailyNote.mockResolvedValue(err('duplicate', 'duplicate key'));
-    dailyNotesRepo.listDailyNotes.mockResolvedValue(
-      ok([cloudNote({ ...n, morning: 'Different content' }, { updatedAt: 'n-ts' })]),
+    const n = note({ text: 'Plan' });
+    dirtyMetadata((m) => markDirty(m, 'quickNote', n.id));
+    quickNotesRepo.createQuickNote.mockResolvedValue(err('duplicate', 'duplicate key'));
+    quickNotesRepo.listQuickNotes.mockResolvedValue(
+      ok([cloudNote({ ...n, text: 'Different content' }, { updatedAt: 'n-ts' })]),
     );
 
-    const noteResult = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ dailyNotes: [n] }));
+    const noteResult = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ quickNotes: [n] }));
     expect(noteResult.outcomes).toEqual([{ kind: 'conflict', message: expect.stringContaining('different content') }]);
   });
 });
@@ -499,7 +506,7 @@ describe('drainDirtyWork — durability across a simulated reload', () => {
 });
 
 describe('drainDirtyWork — ordering', () => {
-  it('processes projects before tasks before daily notes before goals before targets', async () => {
+  it('processes projects before tasks before quick notes before goals before targets', async () => {
     const callOrder: string[] = [];
     const p = project();
     const t = task();
@@ -509,7 +516,7 @@ describe('drainDirtyWork — ordering', () => {
     dirtyMetadata((m) =>
       markDirty(
         markDirty(
-          markDirty(markDirty(markDirty(m, 'target', tg.id), 'goal', g.id), 'dailyNote', n.id),
+          markDirty(markDirty(markDirty(m, 'target', tg.id), 'goal', g.id), 'quickNote', n.id),
           'task',
           t.id,
         ),
@@ -525,8 +532,8 @@ describe('drainDirtyWork — ordering', () => {
       callOrder.push('task');
       return ok(cloudTask(task_));
     });
-    dailyNotesRepo.createDailyNote.mockImplementation(async (note_: DailyNote) => {
-      callOrder.push('dailyNote');
+    quickNotesRepo.createQuickNote.mockImplementation(async (note_: QuickNote) => {
+      callOrder.push('quickNote');
       return ok(cloudNote(note_));
     });
     goalsRepo.createGoal.mockImplementation(async (goal_: Goal) => {
@@ -539,10 +546,10 @@ describe('drainDirtyWork — ordering', () => {
     });
 
     await drainDirtyWork(ACCOUNT, alwaysCurrent, () =>
-      localData({ projects: [p], tasks: [t], dailyNotes: [n], goals: [g], targets: [tg] }),
+      localData({ projects: [p], tasks: [t], quickNotes: [n], goals: [g], targets: [tg] }),
     );
 
-    expect(callOrder).toEqual(['project', 'task', 'dailyNote', 'goal', 'target']);
+    expect(callOrder).toEqual(['project', 'task', 'quickNote', 'goal', 'target']);
   });
 });
 

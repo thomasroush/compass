@@ -698,9 +698,62 @@ a:focus-visible {
   border-top: 1px solid var(--border);
 }
 
-.notes-section .prompt {
-  font-size: 0.9rem;
-  margin-bottom: 0.15rem;
+.quick-notes-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.04);
+}
+
+.quick-note-input {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.quick-note-input input {
+  flex: 1;
+}
+
+.quick-note-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.quick-note-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.quick-note-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.quick-note-text {
+  overflow-wrap: anywhere;
+}
+
+.quick-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 .settings-section {
@@ -969,6 +1022,15 @@ code {
   .quick-add {
     max-width: none;
     width: 100%;
+  }
+
+  .quick-note-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .quick-note-actions button {
+    flex: 1;
   }
 
   /* Touch targets need more headroom than desktop's mouse-driven 44px. */

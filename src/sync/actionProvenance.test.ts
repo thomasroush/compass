@@ -15,7 +15,10 @@ const USER_EDIT_ACTIONS: AppAction[] = [
   { type: 'REORDER_TASK', id: 't1', direction: 'up' },
   { type: 'ADD_PROJECT', id: 'p1', name: 'Home' },
   { type: 'UPDATE_PROJECT', id: 'p1', name: 'X' },
-  { type: 'UPSERT_DAILY_NOTE', id: 'n1', date: '2026-09-01', morning: 'Plan' },
+  { type: 'ADD_QUICK_NOTE', id: 'n1', text: 'Buy underwear' },
+  { type: 'COMPLETE_QUICK_NOTE', id: 'n1' },
+  { type: 'UNCOMPLETE_QUICK_NOTE', id: 'n1' },
+  { type: 'DELETE_QUICK_NOTE', id: 'n1' },
   { type: 'ADD_GOAL', id: 'g1', name: 'Ship it' },
   { type: 'UPDATE_GOAL', id: 'g1', name: 'X' },
   { type: 'LINK_GOAL_PROJECT', goalId: 'g1', projectId: 'p1' },
@@ -46,10 +49,12 @@ describe('classifyActionProvenance', () => {
   it('covers every current AppAction type exactly once between the two lists', () => {
     const covered = [...USER_EDIT_ACTIONS, ...SYNC_BOUNDARY_ACTIONS].map((a) => a.type);
     expect(new Set(covered).size).toBe(covered.length);
-    // 21 user-edit + 4 sync-boundary = 25 distinct AppAction.type values as of
-    // the Goals/Targets foundation stage (ADD_TARGET has 3 union members but
-    // one shared 'type' literal, so it contributes one entry here).
-    expect(covered).toHaveLength(25);
+    // 24 user-edit + 4 sync-boundary = 28 distinct AppAction.type values as of
+    // the Quick Notes feature (ADD_TARGET has 3 union members but one shared
+    // 'type' literal, so it contributes one entry here; Quick Notes has four
+    // separate action types — ADD/COMPLETE/UNCOMPLETE/DELETE — replacing the
+    // single UPSERT_DAILY_NOTE the retired Daily Notes feature used).
+    expect(covered).toHaveLength(28);
   });
 });
 
@@ -163,25 +168,41 @@ describe('resolveDirtyTargets — dirty marking', () => {
     ]);
   });
 
-  it('marks the existing daily note by its own id when the date already has a note, ignoring any id on the action', () => {
-    const prev: AppData = {
-      ...createEmptyAppData(),
-      dailyNotes: [{ id: 'existing-note', date: '2026-09-01', morning: 'Plan', evening: '' }],
-    };
-    const targets = resolveDirtyTargets(
-      { type: 'UPSERT_DAILY_NOTE', id: 'ignored-id', date: '2026-09-01', evening: 'Review' },
-      prev,
-    );
-    expect(targets).toEqual([{ entity: 'dailyNote', id: 'existing-note' }]);
+  it('marks a newly created quick note under the id the caller supplied', () => {
+    const prev = createEmptyAppData();
+    const targets = resolveDirtyTargets({ type: 'ADD_QUICK_NOTE', id: 'new-note', text: 'Buy underwear' }, prev);
+    expect(targets).toEqual([{ entity: 'quickNote', id: 'new-note' }]);
   });
 
-  it('marks a newly created daily note under the id the caller supplied', () => {
+  it('never marks a blank/whitespace-only quick note add dirty', () => {
     const prev = createEmptyAppData();
-    const targets = resolveDirtyTargets(
-      { type: 'UPSERT_DAILY_NOTE', id: 'new-note', date: '2026-09-01', morning: 'Plan' },
-      prev,
-    );
-    expect(targets).toEqual([{ entity: 'dailyNote', id: 'new-note' }]);
+    expect(resolveDirtyTargets({ type: 'ADD_QUICK_NOTE', id: 'n1', text: '' }, prev)).toEqual([]);
+    expect(resolveDirtyTargets({ type: 'ADD_QUICK_NOTE', id: 'n1', text: '   ' }, prev)).toEqual([]);
+  });
+
+  it('marks an existing quick note dirty on complete/uncomplete/delete', () => {
+    const prev: AppData = {
+      ...createEmptyAppData(),
+      quickNotes: [{ id: 'n1', text: 'Buy underwear', completed: false, deleted: false, createdAt: 'ts' }],
+    };
+    expect(resolveDirtyTargets({ type: 'COMPLETE_QUICK_NOTE', id: 'n1' }, prev)).toEqual([
+      { entity: 'quickNote', id: 'n1' },
+    ]);
+    expect(resolveDirtyTargets({ type: 'UNCOMPLETE_QUICK_NOTE', id: 'n1' }, prev)).toEqual([
+      { entity: 'quickNote', id: 'n1' },
+    ]);
+    expect(resolveDirtyTargets({ type: 'DELETE_QUICK_NOTE', id: 'n1' }, prev)).toEqual([
+      { entity: 'quickNote', id: 'n1' },
+    ]);
+  });
+
+  it('never marks a nonexistent or already-deleted quick note dirty', () => {
+    const prev: AppData = {
+      ...createEmptyAppData(),
+      quickNotes: [{ id: 'n1', text: 'Buy underwear', completed: false, deleted: true, createdAt: 'ts' }],
+    };
+    expect(resolveDirtyTargets({ type: 'COMPLETE_QUICK_NOTE', id: 'n1' }, prev)).toEqual([]);
+    expect(resolveDirtyTargets({ type: 'DELETE_QUICK_NOTE', id: 'missing' }, prev)).toEqual([]);
   });
 });
 
@@ -321,14 +342,6 @@ describe('resolveDirtyTargets — exclusion rules', () => {
 
   it('excludes a blank-name ADD_PROJECT', () => {
     const targets = resolveDirtyTargets({ type: 'ADD_PROJECT', id: 'x', name: '' }, createEmptyAppData());
-    expect(targets).toEqual([]);
-  });
-
-  it('excludes a blank/whitespace-only UPSERT_DAILY_NOTE for a date with no existing note', () => {
-    const targets = resolveDirtyTargets(
-      { type: 'UPSERT_DAILY_NOTE', id: 'x', date: '2026-09-01', morning: '  ', evening: '\n' },
-      createEmptyAppData(),
-    );
     expect(targets).toEqual([]);
   });
 

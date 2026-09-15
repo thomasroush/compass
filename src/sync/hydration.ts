@@ -13,7 +13,7 @@ import type { RepositoryErrorType } from '../repository/types';
 export interface EntityCounts {
   projects: number;
   tasks: number;
-  dailyNotes: number;
+  quickNotes: number;
   goals: number;
   targets: number;
 }
@@ -22,7 +22,7 @@ function isEmptyCounts(counts: EntityCounts): boolean {
   return (
     counts.projects === 0 &&
     counts.tasks === 0 &&
-    counts.dailyNotes === 0 &&
+    counts.quickNotes === 0 &&
     counts.goals === 0 &&
     counts.targets === 0
   );
