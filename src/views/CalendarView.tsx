@@ -3,9 +3,24 @@ import { getTasksGroupedByDueDate } from '../store/reducer';
 import { TaskRow } from '../components/TaskRow';
 import { todayDateString } from '../types';
 
-function formatHeading(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-');
-  return `${m}/${d}/${y}`;
+const WEEKDAY_FORMATTER = new Intl.DateTimeFormat('en-US', { weekday: 'long' });
+const MONTH_DAY_FORMATTER = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric' });
+
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatHeading(dateStr: string, todayStr: string): string {
+  const date = parseLocalDate(dateStr);
+  const heading = `${WEEKDAY_FORMATTER.format(date)}, ${MONTH_DAY_FORMATTER.format(date)}`;
+  const sameYear = date.getFullYear() === parseLocalDate(todayStr).getFullYear();
+  return sameYear ? heading : `${heading}, ${date.getFullYear()}`;
+}
+
+function isWeekend(dateStr: string): boolean {
+  const day = parseLocalDate(dateStr).getDay();
+  return day === 0 || day === 6;
 }
 
 export function CalendarView() {
@@ -25,16 +40,22 @@ export function CalendarView() {
       ) : (
         groups.map((group) => {
           const isOverdue = group.date < today;
+          const isToday = group.date === today;
+          const dayClasses = ['section', 'calendar-day'];
+          if (isWeekend(group.date)) dayClasses.push('weekend');
+          if (isToday) dayClasses.push('today');
+
           return (
-            <section key={group.date} className="section calendar-day">
+            <section key={group.date} className={dayClasses.join(' ')}>
               <h2 className={isOverdue ? 'calendar-day-heading overdue' : 'calendar-day-heading'}>
-                {formatHeading(group.date)}
+                {formatHeading(group.date, today)}
+                {isToday && <span className="badge today-badge">Today</span>}
                 {isOverdue && <span className="badge overdue-badge">Overdue</span>}
               </h2>
               <ul className="task-list">
                 {group.tasks.map((task) => (
                   <li key={task.id}>
-                    <TaskRow task={task} showPrimaryToggle={task.status === 'Today'} showPostpone />
+                    <TaskRow task={task} compact minimalActions showTimeInsteadOfDate />
                   </li>
                 ))}
               </ul>

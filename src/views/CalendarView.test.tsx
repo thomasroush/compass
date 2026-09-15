@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe('CalendarView', () => {
-  it('shows only tasks with a due date, grouped under MM/DD/YYYY headings', () => {
+  it('shows only tasks with a due date, grouped under weekday headings', () => {
     mocks.appState.current = {
       ...createEmptyAppData(),
       tasks: [
@@ -35,7 +35,7 @@ describe('CalendarView', () => {
       ],
     };
     render(<CalendarView />);
-    expect(screen.getByText('09/05/2026')).toBeTruthy();
+    expect(screen.getByText('Saturday, September 5')).toBeTruthy();
     expect(screen.getByText('Dated task')).toBeTruthy();
     expect(screen.queryByText('Undated task')).toBeNull();
   });
@@ -50,7 +50,18 @@ describe('CalendarView', () => {
     };
     render(<CalendarView />);
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
-    expect(headings.indexOf('09/01/2026')).toBeLessThan(headings.indexOf('09/10/2026'));
+    const earlierIndex = headings.findIndex((h) => h?.startsWith('Tuesday, September 1'));
+    const laterIndex = headings.findIndex((h) => h?.startsWith('Thursday, September 10'));
+    expect(earlierIndex).toBeLessThan(laterIndex);
+  });
+
+  it('includes the year in the heading when the due date falls outside the current year', () => {
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      tasks: [makeTask({ id: 'past', title: 'Past task', dueDate: '2000-01-01' })],
+    };
+    render(<CalendarView />);
+    expect(screen.getByText('Saturday, January 1, 2000')).toBeTruthy();
   });
 
   it('visually marks a past due date as overdue', () => {
@@ -60,6 +71,18 @@ describe('CalendarView', () => {
     };
     render(<CalendarView />);
     expect(screen.getByText('Overdue')).toBeTruthy();
+  });
+
+  it('shows only Complete and Edit actions on each task row', () => {
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      tasks: [makeTask({ id: 'dated', title: 'Dated task', dueDate: '2026-09-05' })],
+    };
+    render(<CalendarView />);
+    expect(screen.getByRole('button', { name: 'Complete' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull();
+    expect(screen.queryByLabelText('Move to')).toBeNull();
   });
 
   it('excludes archived dated tasks', () => {

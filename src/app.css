@@ -37,6 +37,8 @@
   --status-done: #57815f;
   --status-done-bg: #eaf2ec;
   --calendar-accent: #0f6f66;
+  --calendar-weekend-bg: #eef1f6;
+  --calendar-today-bg: #f2f8f7;
 
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   line-height: 1.5;
@@ -421,6 +423,32 @@ a:focus-visible {
   color: var(--status-inbox);
 }
 
+.calendar-day {
+  padding: 0.75rem 0.85rem;
+  border-radius: 6px;
+}
+
+/* Thin divider between consecutive day sections, replacing plain vertical
+   gap so days read as distinct rows rather than one continuous list. */
+.calendar-day + .calendar-day {
+  border-top: 1px solid var(--border);
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+}
+
+/* Subtle, light tint so weekend days are easy to spot at a glance without
+   being visually loud. */
+.calendar-day.weekend {
+  background: var(--calendar-weekend-bg);
+}
+
+/* Subtle emphasis for today: a soft fill plus a left accent bar, not a loud
+   badge-only treatment, so it reads at a glance while scanning the list. */
+.calendar-day.today {
+  background: var(--calendar-today-bg);
+  box-shadow: inset 3px 0 0 0 var(--calendar-accent);
+}
+
 .calendar-day-heading {
   display: flex;
   align-items: center;
@@ -428,8 +456,18 @@ a:focus-visible {
   color: var(--calendar-accent);
 }
 
+.calendar-day.today .calendar-day-heading {
+  font-weight: 700;
+}
+
 .calendar-day-heading.overdue {
   color: var(--danger);
+}
+
+.today-badge {
+  border-color: var(--calendar-accent);
+  background: var(--accent-soft);
+  color: var(--calendar-accent);
 }
 
 .overdue-badge {

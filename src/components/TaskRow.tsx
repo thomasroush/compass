@@ -11,6 +11,22 @@ interface TaskRowProps {
   showPostpone?: boolean;
   showReorder?: boolean;
   compact?: boolean;
+  /** When true, renders only the Complete/Reopen and Edit actions, hiding
+   * primary toggle, postpone, reorder, status select, and archive. Used by
+   * the Calendar view to keep rows scannable; other views are unaffected. */
+  minimalActions?: boolean;
+  /** When true, shows the task's due time (if set) instead of the
+   * "Due {date}" text — used by the Calendar view, which already groups
+   * tasks under a date heading. */
+  showTimeInsteadOfDate?: boolean;
+}
+
+function formatTime12h(time: string): string {
+  const [hStr, mStr] = time.split(':');
+  const h = Number(hStr);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${mStr} ${period}`;
 }
 
 export function TaskRow({
@@ -19,6 +35,8 @@ export function TaskRow({
   showPostpone = false,
   showReorder = false,
   compact = false,
+  minimalActions = false,
+  showTimeInsteadOfDate = false,
 }: TaskRowProps) {
   const { state, dispatch } = useApp();
   const [editing, setEditing] = useState(false);
@@ -40,7 +58,9 @@ export function TaskRow({
             {task.priority !== 'Normal' && (
               <span className="badge">{task.priority}</span>
             )}
-            {task.dueDate && <span className="meta-text">Due {task.dueDate}</span>}
+            {showTimeInsteadOfDate
+              ? task.dueTime && <span className="meta-text">{formatTime12h(task.dueTime)}</span>
+              : task.dueDate && <span className="meta-text">Due {task.dueDate}</span>}
             {project && <span className="meta-text">{project.name}</span>}
             {task.isPrimary && <span className="badge primary">Primary</span>}
           </div>
@@ -48,7 +68,7 @@ export function TaskRow({
         </div>
 
         <div className="task-actions">
-          {showPrimaryToggle && task.status === 'Today' && (
+          {!minimalActions && showPrimaryToggle && task.status === 'Today' && (
             <button
               type="button"
               className="secondary"
@@ -81,7 +101,7 @@ export function TaskRow({
             Edit
           </button>
 
-          {showPostpone && (
+          {!minimalActions && showPostpone && (
             <>
               <button
                 type="button"
@@ -100,7 +120,7 @@ export function TaskRow({
             </>
           )}
 
-          {showReorder && (
+          {!minimalActions && showReorder && (
             <>
               <button
                 type="button"
@@ -121,20 +141,24 @@ export function TaskRow({
             </>
           )}
 
-          <StatusSelect
-            id={`status-${task.id}`}
-            value={task.status}
-            onChange={handleStatusChange}
-            label="Move to"
-          />
+          {!minimalActions && (
+            <StatusSelect
+              id={`status-${task.id}`}
+              value={task.status}
+              onChange={handleStatusChange}
+              label="Move to"
+            />
+          )}
 
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => dispatch({ type: 'ARCHIVE_TASK', id: task.id })}
-          >
-            Archive
-          </button>
+          {!minimalActions && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => dispatch({ type: 'ARCHIVE_TASK', id: task.id })}
+            >
+              Archive
+            </button>
+          )}
         </div>
       </article>
 
