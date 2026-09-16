@@ -4,8 +4,8 @@ export function AboutView() {
       <header className="view-header">
         <h1>About Daily Compass</h1>
         <p className="subtitle">
-          Daily Compass helps you decide where you are going, organize the work and focus on
-          what matters today.
+          Daily Compass helps you decide where you are going, capture what is on your mind,
+          organize the work and focus on what matters today.
         </p>
       </header>
 
@@ -31,12 +31,18 @@ export function AboutView() {
           <br />
           What specifically needs to be done?
         </p>
+        <p>
+          <strong>Quick Notes capture thoughts.</strong>
+          <br />
+          What do you want to remember without stopping to organize it?
+        </p>
         <p>For example:</p>
         <ul>
           <li><strong>Goal:</strong> Achieve excellent health and fitness</li>
           <li><strong>Target:</strong> Reach 165 pounds</li>
           <li><strong>Project:</strong> Perfect Body</li>
           <li><strong>Task:</strong> Attend a boxing class</li>
+          <li><strong>Quick Note:</strong> Look into boxing gyms near Katy</li>
         </ul>
       </section>
 
@@ -48,9 +54,15 @@ export function AboutView() {
           The Tasks you intend to focus on today.
         </p>
         <p>
+          <strong>Quick Notes</strong>
+          <br />
+          Capture ideas, reminders and information quickly. A Quick Note does not need to be
+          organized or turned into a Task immediately.
+        </p>
+        <p>
           <strong>Tasks</strong>
           <br />
-          New, unassigned and individual actions that still need to be organized.
+          See new, unassigned and individual actions that still need to be organized.
         </p>
         <p>
           <strong>Board</strong>
@@ -76,7 +88,7 @@ export function AboutView() {
         <p>
           <strong>Daily Compass</strong>
           <br />
-          Record notes, think through priorities and decide what deserves your attention.
+          Think through priorities, record reflections and decide what deserves your attention.
         </p>
       </section>
 
@@ -102,6 +114,7 @@ export function AboutView() {
       <section className="section">
         <h2>A simple way to begin</h2>
         <ol>
+          <li>Use Quick Notes to capture thoughts before you forget them.</li>
           <li>Create a Project for an important area of work.</li>
           <li>Add the Tasks you already know need to be done.</li>
           <li>Create a Goal when you can clearly describe the larger outcome.</li>
@@ -110,13 +123,13 @@ export function AboutView() {
           <li>Review your Compass regularly and adjust course when necessary.</li>
         </ol>
         <p>
-          You do not need to fill in everything at once. Start with the work in front of you,
-          then add structure as it becomes useful.
+          You do not need to fill in everything at once. Capture what is on your mind, begin
+          with the work in front of you and add structure as it becomes useful.
         </p>
         <p>
           <strong>
             Goals provide direction. Targets show progress. Projects organize the work. Tasks
-            move it forward.
+            move it forward. Quick Notes capture everything else.
           </strong>
         </p>
       </section>
