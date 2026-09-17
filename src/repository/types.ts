@@ -13,6 +13,56 @@ export type CloudGoal = Goal & { updatedAt: string };
 export type CloudTarget = Target & { updatedAt: string };
 
 /**
+ * Shared-Projects collaboration types. These mirror
+ * supabase/migrations/20260916120000_add_shared_project_membership.sql
+ * exactly (same field set, same allowed values) and deliberately live here
+ * rather than in src/types.ts: unlike Task/Project/Goal/etc., a membership or
+ * invitation is never part of the offline-first `AppData` model — it is
+ * always read live from Supabase, never cached in localStorage or synced
+ * through hydrateFromCloud/refreshFromCloud/drainSync.
+ *
+ * 'editor' is the only Project role this MVP's database defines
+ * (`project_members.role check (role = 'editor')`) — do not add another
+ * value here without a matching migration.
+ */
+export const PROJECT_ROLES = ['editor'] as const;
+export type ProjectRole = (typeof PROJECT_ROLES)[number];
+
+/** Matches `project_invitations.status`'s check constraint exactly. */
+export const INVITATION_STATUSES = ['pending', 'accepted', 'declined', 'revoked'] as const;
+export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
+
+/**
+ * Mirrors public.project_members. `ownerId` is the Project Owner's user_id
+ * (the Project's implicit owner); `memberId` is the accepted Editor.
+ * `memberEmail` is the collaborator's normalized email at the time they
+ * accepted (recorded by `accept_project_invitation`, from their own
+ * authenticated JWT — never a client-supplied value) — `undefined` only for
+ * a membership row that predates this field
+ * (20260917120000_add_member_email_to_project_members.sql).
+ */
+export interface ProjectMember {
+  ownerId: string;
+  projectId: string;
+  memberId: string;
+  memberEmail?: string;
+  role: ProjectRole;
+  createdAt: string;
+}
+
+/** Mirrors public.project_invitations. `invitedEmail` is always the normalized (trimmed, lowercased) form the database itself stores. */
+export interface ProjectInvitation {
+  id: string;
+  ownerId: string;
+  projectId: string;
+  invitedEmail: string;
+  status: InvitationStatus;
+  createdAt: string;
+  /** Set only once the invited user accepts or declines — never set by a revoke. See the migration's own comment on this column. */
+  respondedAt?: string;
+}
+
+/**
  * 'conflict' is returned only by a guarded (compare-and-swap) update whose
  * expected `updated_at` no longer matches the server row — i.e. someone else
  * (another device) wrote to it first. It is distinct from 'database', which

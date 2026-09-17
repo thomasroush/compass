@@ -30,6 +30,17 @@ export interface Task {
   sortOrder: number;
   isPrimary: boolean;
   archived: boolean;
+  /**
+   * The Supabase `user_id` that actually owns this row — the account whose
+   * Project this Task belongs to, which for a shared Project's Task is the
+   * Owner, not necessarily whoever is signed in right now. Undefined for a
+   * record that has never round-tripped through the cloud repository layer
+   * (a purely local, never-synced Task, or one read before this field
+   * existed) — never assume an absent `ownerId` means "mine," and never
+   * derive it from the current session; it only ever comes from a database
+   * row's own `user_id` column.
+   */
+  ownerId?: string;
 }
 
 export interface Project {
@@ -39,6 +50,8 @@ export interface Project {
   status: ProjectStatus;
   /** Optional manual ordering rank (1, 2, 3, ...). Unset means unranked. */
   priorityRank?: number;
+  /** See Task.ownerId's doc comment — same meaning, same caveats, applied to a Project. */
+  ownerId?: string;
 }
 
 export interface QuickNote {

@@ -73,6 +73,56 @@ describe('validateAppData — backward compatibility', () => {
   });
 });
 
+const validTask = {
+  id: 't1',
+  title: 'Buy milk',
+  status: 'Inbox',
+  priority: 'Normal',
+  createdAt: '2026-08-30T00:00:00.000Z',
+  sortOrder: 0,
+  isPrimary: false,
+  archived: false,
+};
+
+const validProject = { id: 'p1', name: 'Home', status: 'active' };
+
+describe('validateAppData — Task/Project ownerId', () => {
+  it('accepts an existing Task/Project with no ownerId at all — pre-sharing local data must load exactly as before', () => {
+    const result = validateAppData({ ...BASE, tasks: [validTask], projects: [validProject] });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.tasks[0].ownerId).toBeUndefined();
+      expect(result.data.projects[0].ownerId).toBeUndefined();
+    }
+  });
+
+  it('preserves a valid ownerId on both Task and Project', () => {
+    const result = validateAppData({
+      ...BASE,
+      tasks: [{ ...validTask, ownerId: 'owner-1' }],
+      projects: [{ ...validProject, ownerId: 'owner-1' }],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.tasks[0].ownerId).toBe('owner-1');
+      expect(result.data.projects[0].ownerId).toBe('owner-1');
+    }
+  });
+
+  it('drops a non-string ownerId rather than rejecting the whole record', () => {
+    const result = validateAppData({
+      ...BASE,
+      tasks: [{ ...validTask, ownerId: 12345 }],
+      projects: [{ ...validProject, ownerId: 12345 }],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.tasks[0].ownerId).toBeUndefined();
+      expect(result.data.projects[0].ownerId).toBeUndefined();
+    }
+  });
+});
+
 const validQuickNote = {
   id: 'n1',
   text: 'Buy underwear',

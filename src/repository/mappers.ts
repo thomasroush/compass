@@ -11,7 +11,17 @@ import type {
   Task,
   TaskStatus,
 } from '../types';
-import type { CloudQuickNote, CloudGoal, CloudProject, CloudTarget, CloudTask } from './types';
+import type {
+  CloudQuickNote,
+  CloudGoal,
+  CloudProject,
+  CloudTarget,
+  CloudTask,
+  InvitationStatus,
+  ProjectInvitation,
+  ProjectMember,
+  ProjectRole,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -35,6 +45,21 @@ export function projectFromRow(row: ProjectRow): CloudProject {
     priorityRank: row.priority_rank ?? undefined,
     updatedAt: row.updated_at,
   };
+}
+
+/**
+ * A ProjectRow selected alongside its own `user_id` — used only by queries
+ * that need to tell an owned Project from a shared one (e.g.
+ * `listVisibleProjects`), never by the ordinary owner-scoped `listProjects`
+ * that `hydrateFromCloud`/`refreshFromCloud`/`drainSync` already depend on.
+ */
+export interface ProjectRowWithOwner extends ProjectRow {
+  user_id: string;
+}
+
+/** Like projectFromRow, but also carries the row's real owner as `ownerId` — never the caller's own id, always the database's own `user_id` column. */
+export function projectFromRowWithOwner(row: ProjectRowWithOwner): CloudProject {
+  return { ...projectFromRow(row), ownerId: row.user_id };
 }
 
 export interface ProjectInsertRow {
@@ -119,6 +144,16 @@ export function taskFromRow(row: TaskRow): CloudTask {
     archived: row.archived,
     updatedAt: row.updated_at,
   };
+}
+
+/** See ProjectRowWithOwner's doc comment — same purpose, applied to tasks. */
+export interface TaskRowWithOwner extends TaskRow {
+  user_id: string;
+}
+
+/** Like taskFromRow, but also carries the row's real owner as `ownerId`. */
+export function taskFromRowWithOwner(row: TaskRowWithOwner): CloudTask {
+  return { ...taskFromRow(row), ownerId: row.user_id };
 }
 
 export interface TaskInsertRow {
@@ -478,4 +513,58 @@ export function targetUpdatesToRow(updates: TargetRowUpdateInput): TargetUpdateR
   if ('achieved' in updates) row.achieved = updates.achieved ?? null;
   if ('taskIds' in updates) row.task_ids = updates.taskIds;
   return row;
+}
+
+// ---------------------------------------------------------------------------
+// Shared-Projects collaboration (project_members / project_invitations)
+//
+// No *ToInsertRow/*UpdatesToRow helpers here, unlike every entity above:
+// membership rows are never updated (see the migration — role is fixed, and
+// the only insert path is the database's own accept_project_invitation
+// function, not a client-built row), and an invitation's own writes
+// (create/accept/decline/revoke) are each a small, fixed shape handled
+// directly in projectInvitationsRepository.ts rather than a general
+// partial-update API like updateProject's.
+// ---------------------------------------------------------------------------
+
+export interface ProjectMemberRow {
+  owner_id: string;
+  project_id: string;
+  member_id: string;
+  member_email: string | null;
+  role: ProjectRole;
+  created_at: string;
+}
+
+export function projectMemberFromRow(row: ProjectMemberRow): ProjectMember {
+  return {
+    ownerId: row.owner_id,
+    projectId: row.project_id,
+    memberId: row.member_id,
+    memberEmail: row.member_email ?? undefined,
+    role: row.role,
+    createdAt: row.created_at,
+  };
+}
+
+export interface ProjectInvitationRow {
+  id: string;
+  owner_id: string;
+  project_id: string;
+  invited_email: string;
+  status: InvitationStatus;
+  created_at: string;
+  responded_at: string | null;
+}
+
+export function projectInvitationFromRow(row: ProjectInvitationRow): ProjectInvitation {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    projectId: row.project_id,
+    invitedEmail: row.invited_email,
+    status: row.status,
+    createdAt: row.created_at,
+    respondedAt: row.responded_at ?? undefined,
+  };
 }

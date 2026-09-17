@@ -1,20 +1,26 @@
 import { FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../store/useApp';
+import { useAuth } from '../store/useAuth';
 import {
   getGoalProgress,
   getProjectGoals,
   getProjectTasks,
   getVisibleProjects,
+  isSharedProject,
   sortProjectsByPriority,
 } from '../store/reducer';
 import { TaskRow } from '../components/TaskRow';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ManageSharingDialog } from '../components/ManageSharingDialog';
+import { PendingInvitationsPanel } from '../components/PendingInvitationsPanel';
 import { ProgressBar } from '../components/ProgressBar';
 import type { Project, ProjectStatus } from '../types';
 
 export function ProjectsView() {
   const { state, dispatch } = useApp();
+  const auth = useAuth();
+  const accountId = auth.isSupabaseConfigured ? auth.user?.id : undefined;
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -23,6 +29,7 @@ export function ProjectsView() {
   const [editDescription, setEditDescription] = useState('');
   const [editPriority, setEditPriority] = useState('');
   const [archiving, setArchiving] = useState<Project | null>(null);
+  const [sharing, setSharing] = useState<Project | null>(null);
 
   const sorted = sortProjectsByPriority(getVisibleProjects(state.projects));
 
@@ -78,6 +85,8 @@ export function ProjectsView() {
         <p className="subtitle">Group related tasks under projects.</p>
       </header>
 
+      <PendingInvitationsPanel />
+
       <form className="inline-form" onSubmit={handleAdd}>
         <div className="field">
           <label htmlFor="project-name">Project name</label>
@@ -109,6 +118,7 @@ export function ProjectsView() {
             const tasks = getProjectTasks(state.tasks, project.id);
             const linkedGoals = getProjectGoals(state.goals, project.id);
             const expanded = expandedId === project.id;
+            const shared = isSharedProject(project, accountId);
 
             return (
               <li key={project.id} className="project-card">
@@ -116,6 +126,7 @@ export function ProjectsView() {
                   <div>
                     <h2>{project.name}</h2>
                     <span className="badge">{project.status}</span>
+                    {shared && <span className="badge">Shared</span>}
                     {project.priorityRank !== undefined && (
                       <span className="badge priority">Priority {project.priorityRank}</span>
                     )}
@@ -128,7 +139,13 @@ export function ProjectsView() {
                     <button type="button" className="secondary" onClick={() => startEdit(project)}>
                       Edit
                     </button>
-                    {project.status === 'active' && (
+                    {/* Archiving, restoring, marking completed/active, and managing
+                        sharing are all Owner-only in the database (a shared
+                        Project's status can only ever be changed by its Owner —
+                        see the migration's prevent_project_owner_change trigger),
+                        so this UI hides them for an Editor rather than exposing a
+                        control that would only fail server-side. */}
+                    {!shared && project.status === 'active' && (
                       <button
                         type="button"
                         className="secondary"
@@ -137,20 +154,27 @@ export function ProjectsView() {
                         Mark completed
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => setArchiving(project)}
-                    >
-                      Archive
-                    </button>
-                    {project.status !== 'active' && (
+                    {!shared && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => setArchiving(project)}
+                      >
+                        Archive
+                      </button>
+                    )}
+                    {!shared && project.status !== 'active' && (
                       <button
                         type="button"
                         className="secondary"
                         onClick={() => setStatus(project.id, 'active')}
                       >
                         Mark active
+                      </button>
+                    )}
+                    {!shared && accountId && (
+                      <button type="button" className="secondary" onClick={() => setSharing(project)}>
+                        Manage sharing
                       </button>
                     )}
                     <button
@@ -268,6 +292,10 @@ export function ProjectsView() {
         onConfirm={confirmArchive}
         onCancel={() => setArchiving(null)}
       />
+
+      {sharing && accountId && (
+        <ManageSharingDialog project={sharing} accountId={accountId} onClose={() => setSharing(null)} />
+      )}
     </div>
   );
 }

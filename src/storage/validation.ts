@@ -60,6 +60,13 @@ function validateTask(value: unknown): Task | null {
   if (t.dueDate !== undefined && !isString(t.dueDate)) return null;
   if (t.dueTime !== undefined && !isString(t.dueTime)) return null;
   if (t.completedAt !== undefined && !isString(t.completedAt)) return null;
+  // Backward compatibility: existing locally stored Tasks predate ownerId
+  // and simply won't have the key at all — that must load exactly as before,
+  // never be rejected. When present, it must be a plain string; an invalid
+  // value is dropped (falls through to undefined) rather than failing the
+  // whole record, since ownerId is provenance metadata, not something the
+  // rest of the app depends on being correct to function.
+  const ownerId = isString(t.ownerId) ? t.ownerId : undefined;
 
   return {
     id: t.id,
@@ -75,6 +82,7 @@ function validateTask(value: unknown): Task | null {
     sortOrder: t.sortOrder,
     isPrimary: t.isPrimary,
     archived: t.archived,
+    ownerId,
   };
 }
 
@@ -88,6 +96,9 @@ function validateProject(value: unknown): Project | null {
   if (p.description !== undefined && !isString(p.description)) return null;
   if (p.priorityRank !== undefined && (!isNumber(p.priorityRank) || p.priorityRank <= 0))
     return null;
+  // See validateTask's matching comment: same backward-compatibility and
+  // lenient-drop-if-invalid handling, applied to Project.
+  const ownerId = isString(p.ownerId) ? p.ownerId : undefined;
 
   return {
     id: p.id,
@@ -95,6 +106,7 @@ function validateProject(value: unknown): Project | null {
     description: p.description,
     status: p.status as Project['status'],
     priorityRank: p.priorityRank,
+    ownerId,
   };
 }
 

@@ -26,6 +26,7 @@ interface MockBuilder {
   upsert: ReturnType<typeof vi.fn>;
   single: ReturnType<typeof vi.fn>;
   maybeSingle: ReturnType<typeof vi.fn>;
+  setHeader: ReturnType<typeof vi.fn>;
   then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
 }
 
@@ -40,6 +41,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
   builder.upsert = vi.fn(self);
   builder.single = vi.fn(self);
   builder.maybeSingle = vi.fn(self);
+  builder.setHeader = vi.fn(self);
   builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
   return builder;
 }

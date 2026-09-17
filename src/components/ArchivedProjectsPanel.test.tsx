@@ -9,15 +9,18 @@ const mocks = vi.hoisted(() => ({
     current: { version: 1, tasks: [], projects: [], quickNotes: [], goals: [], targets: [] } as AppData,
     dispatch: vi.fn(),
   },
+  authState: { isSupabaseConfigured: false, user: null as { id: string } | null },
 }));
 
 vi.mock('../store/useApp', () => ({
   useApp: () => ({ state: mocks.appState.current, dispatch: mocks.appState.dispatch }),
 }));
+vi.mock('../store/useAuth', () => ({ useAuth: () => mocks.authState }));
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.appState.current = createEmptyAppData();
+  mocks.authState = { isSupabaseConfigured: false, user: null };
 });
 
 afterEach(() => {
@@ -62,5 +65,27 @@ describe('ArchivedProjectsPanel', () => {
       id: 'archived-1',
       status: 'active',
     });
+  });
+
+  it('hides Restore, and shows a Shared badge, for an archived Project owned by a different account', () => {
+    mocks.authState = { isSupabaseConfigured: true, user: { id: 'editor-1' } };
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      projects: [{ id: 'shared-1', name: 'Shared project', status: 'archived', ownerId: 'owner-x' }],
+    };
+    render(<ArchivedProjectsPanel />);
+
+    expect(screen.getByText('Shared')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Restore' })).toBeNull();
+  });
+
+  it('still shows Restore for an archived Project the signed-in account owns', () => {
+    mocks.authState = { isSupabaseConfigured: true, user: { id: 'owner-1' } };
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      projects: [{ id: 'mine', name: 'My project', status: 'archived', ownerId: 'owner-1' }],
+    };
+    render(<ArchivedProjectsPanel />);
+    expect(screen.getByRole('button', { name: 'Restore' })).toBeTruthy();
   });
 });

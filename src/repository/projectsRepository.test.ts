@@ -19,6 +19,7 @@ import {
   createProject,
   deleteProject,
   listProjects,
+  listVisibleProjects,
   updateProject,
   updateProjectGuarded,
   upsertProject,
@@ -34,6 +35,7 @@ interface MockBuilder {
   delete: ReturnType<typeof vi.fn>;
   single: ReturnType<typeof vi.fn>;
   maybeSingle: ReturnType<typeof vi.fn>;
+  setHeader: ReturnType<typeof vi.fn>;
   then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
 }
 
@@ -49,6 +51,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
   builder.delete = vi.fn(self);
   builder.single = vi.fn(self);
   builder.maybeSingle = vi.fn(self);
+  builder.setHeader = vi.fn(self);
   builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
   return builder;
 }
@@ -133,6 +136,78 @@ describe('listProjects', () => {
       expect(result.error.type).toBe('database');
       expect(result.error.message).toBe('permission denied');
     }
+  });
+});
+
+describe('listVisibleProjects', () => {
+  it('selects user_id and maps it to ownerId, issuing no user_id filter of its own', async () => {
+    signIn('editor-1');
+    const builder = makeBuilder({
+      data: [
+        {
+          id: 'p1',
+          user_id: 'owner-1',
+          name: 'Shared project',
+          description: null,
+          status: 'active',
+          priority_rank: null,
+          updated_at: 'ts',
+        },
+      ],
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const result = await listVisibleProjects();
+
+    expect(from).toHaveBeenCalledWith('projects');
+    expect(builder.select).toHaveBeenCalledWith(expect.stringContaining('user_id'));
+    expect(builder.eq).not.toHaveBeenCalledWith('user_id', expect.anything());
+    expect(result).toEqual({
+      ok: true,
+      data: [
+        {
+          id: 'p1',
+          name: 'Shared project',
+          description: undefined,
+          status: 'active',
+          priorityRank: undefined,
+          updatedAt: 'ts',
+          ownerId: 'owner-1',
+        },
+      ],
+    });
+  });
+
+  it('preserves the real owner even for the caller\'s own Project, rather than assuming self', async () => {
+    signIn('owner-1');
+    from.mockReturnValue(
+      makeBuilder({
+        data: [
+          {
+            id: 'p1',
+            user_id: 'owner-1',
+            name: 'My project',
+            description: null,
+            status: 'active',
+            priority_rank: null,
+            updated_at: 'ts',
+          },
+        ],
+        error: null,
+      }),
+    );
+
+    const result = await listVisibleProjects();
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data[0].ownerId).toBe('owner-1');
+  });
+
+  it('rejects without a session, and never queries the database', async () => {
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const result = await listVisibleProjects();
+    expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -240,6 +315,41 @@ describe('updateProject', () => {
 
     await updateProject('p1', { priorityRank: undefined }, 'user-1');
     expect(builder.update).toHaveBeenCalledWith({ priority_rank: null });
+  });
+
+  it('targets the shared Project\'s real owner when ownerId is given, while authenticating as the acting Editor', async () => {
+    signIn('editor-1');
+    const builder = makeBuilder({
+      data: { id: 'p1', name: 'Renamed', description: null, status: 'active', updated_at: 'ts2' },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const result = await updateProject('p1', { name: 'Renamed' }, 'editor-1', 'owner-1');
+
+    expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'owner-1');
+    expect(builder.eq).toHaveBeenNthCalledWith(2, 'id', 'p1');
+    expect(result.ok).toBe(true);
+  });
+
+  it('omitting ownerId still targets the caller\'s own id, unchanged from before ownerId existed', async () => {
+    signIn('user-1');
+    const builder = makeBuilder({
+      data: { id: 'p1', name: 'Renamed', description: null, status: 'active', updated_at: 'ts2' },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    await updateProject('p1', { name: 'Renamed' }, 'user-1');
+    expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'user-1');
+  });
+
+  it('verifies the acting Editor\'s own session identity via expectedAccountId, never ownerId', async () => {
+    signIn('someone-else');
+    const result = await updateProject('p1', { name: 'Renamed' }, 'editor-1', 'owner-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
   });
 });
 
@@ -359,6 +469,32 @@ describe('updateProjectGuarded', () => {
 
     await updateProjectGuarded('p1', { priorityRank: 3 }, 'ts1', 'user-1');
     expect(builder.update).toHaveBeenCalledWith({ priority_rank: 3 });
+  });
+
+  it('targets the shared Project\'s real owner when ownerId is given, preserving the compare-and-swap on updated_at', async () => {
+    signIn('editor-1');
+    const builder = makeBuilder({
+      data: { id: 'p1', name: 'Renamed', description: null, status: 'active', updated_at: 'ts2' },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'ts1', 'editor-1', 'owner-1');
+
+    expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'owner-1');
+    expect(builder.eq).toHaveBeenNthCalledWith(2, 'id', 'p1');
+    expect(builder.eq).toHaveBeenNthCalledWith(3, 'updated_at', 'ts1');
+    expect(result.ok).toBe(true);
+  });
+
+  it('still reports a typed conflict (not an account/permission error) when ownerId is given and the row changed', async () => {
+    signIn('editor-1');
+    from.mockReturnValue(makeBuilder({ data: null, error: null }));
+
+    const result = await updateProjectGuarded('p1', { name: 'Renamed' }, 'stale', 'editor-1', 'owner-1');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('conflict');
   });
 });
 

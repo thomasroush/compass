@@ -328,6 +328,14 @@ a:focus-visible {
   font-size: 1.1rem;
 }
 
+/* Lets a long, unbroken email address (invited/collaborator) wrap onto a
+   new line on narrow screens instead of overflowing its row — plain text
+   elsewhere in the app (names, descriptions) already has natural word-break
+   points and needs no equivalent rule. */
+.email-text {
+  overflow-wrap: anywhere;
+}
+
 .empty {
   color: var(--muted);
   font-style: italic;

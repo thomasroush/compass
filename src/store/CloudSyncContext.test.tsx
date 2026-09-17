@@ -17,8 +17,8 @@ const auth = vi.hoisted(() => ({
   onAuthStateChange: vi.fn(),
 }));
 
-const projectsRepo = vi.hoisted(() => ({ listProjects: vi.fn() }));
-const tasksRepo = vi.hoisted(() => ({ listTasks: vi.fn() }));
+const projectsRepo = vi.hoisted(() => ({ listVisibleProjects: vi.fn() }));
+const tasksRepo = vi.hoisted(() => ({ listVisibleTasks: vi.fn() }));
 const quickNotesRepo = vi.hoisted(() => ({ listQuickNotes: vi.fn() }));
 const goalsRepo = vi.hoisted(() => ({ listGoals: vi.fn() }));
 const targetsRepo = vi.hoisted(() => ({ listTargets: vi.fn() }));
@@ -130,8 +130,8 @@ beforeEach(() => {
     authChangeCallback = cb;
     return { data: { subscription: { unsubscribe: vi.fn() } } };
   });
-  projectsRepo.listProjects.mockResolvedValue(ok([]));
-  tasksRepo.listTasks.mockResolvedValue(ok([]));
+  projectsRepo.listVisibleProjects.mockResolvedValue(ok([]));
+  tasksRepo.listVisibleTasks.mockResolvedValue(ok([]));
   quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
   goalsRepo.listGoals.mockResolvedValue(ok([]));
   targetsRepo.listTargets.mockResolvedValue(ok([]));
@@ -149,12 +149,12 @@ describe('CloudSyncProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('idle'));
     expect(screen.getByTestId('project-count').textContent).toBe('1');
-    expect(projectsRepo.listProjects).not.toHaveBeenCalled();
+    expect(projectsRepo.listVisibleProjects).not.toHaveBeenCalled();
   });
 
   it('hydrates local state from the cloud when signed in with cloud data and empty local storage', async () => {
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
-    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listVisibleTasks.mockResolvedValue(ok([cloudTask()]));
     quickNotesRepo.listQuickNotes.mockResolvedValue(ok([cloudNote()]));
 
     renderApp();
@@ -180,7 +180,7 @@ describe('CloudSyncProvider', () => {
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
     signIn('user-1');
 
-    await waitFor(() => expect(projectsRepo.listProjects).toHaveBeenCalled());
+    await waitFor(() => expect(projectsRepo.listVisibleProjects).toHaveBeenCalled());
     expect(screen.getByTestId('status').textContent).toBe('idle');
     expect(screen.getByTestId('project-count').textContent).toBe('0');
 
@@ -194,7 +194,7 @@ describe('CloudSyncProvider', () => {
 
   it('reports a recoverable error and leaves local data untouched when the cloud read fails', async () => {
     localStorage.setItem('daily-compass-v1', JSON.stringify(populatedLocal()));
-    projectsRepo.listProjects.mockResolvedValue(err('database', 'Network request failed.'));
+    projectsRepo.listVisibleProjects.mockResolvedValue(err('database', 'Network request failed.'));
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
@@ -205,8 +205,8 @@ describe('CloudSyncProvider', () => {
     expect(screen.getByTestId('project-count').textContent).toBe('1');
 
     // Retry re-runs the same attempt.
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
-    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listVisibleTasks.mockResolvedValue(ok([cloudTask()]));
     quickNotesRepo.listQuickNotes.mockResolvedValue(ok([cloudNote()]));
     act(() => {
       screen.getByRole('button', { name: 'retry' }).click();
@@ -220,7 +220,7 @@ describe('CloudSyncProvider', () => {
 
   it('requires an explicit choice, without changing local data, when both sides have data and no established link exists', async () => {
     localStorage.setItem('daily-compass-v1', JSON.stringify(populatedLocal()));
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ id: 'other-proj' })]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject({ id: 'other-proj' })]));
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
@@ -232,8 +232,8 @@ describe('CloudSyncProvider', () => {
   });
 
   it('never silently swaps in a second account\'s cloud data over a first account\'s data still present on this device', async () => {
-    projectsRepo.listProjects.mockResolvedValueOnce(ok([cloudProject({ id: 'a-proj', name: 'Account A' })]));
-    tasksRepo.listTasks.mockResolvedValueOnce(ok([]));
+    projectsRepo.listVisibleProjects.mockResolvedValueOnce(ok([cloudProject({ id: 'a-proj', name: 'Account A' })]));
+    tasksRepo.listVisibleTasks.mockResolvedValueOnce(ok([]));
     quickNotesRepo.listQuickNotes.mockResolvedValueOnce(ok([]));
 
     renderApp();
@@ -252,8 +252,8 @@ describe('CloudSyncProvider', () => {
     // Account A's data is still local, and this device has no established
     // link with account B, so cloud data must not be auto-loaded over it.
     signOut();
-    projectsRepo.listProjects.mockResolvedValueOnce(ok([cloudProject({ id: 'b-proj', name: 'Account B' })]));
-    tasksRepo.listTasks.mockResolvedValueOnce(ok([]));
+    projectsRepo.listVisibleProjects.mockResolvedValueOnce(ok([cloudProject({ id: 'b-proj', name: 'Account B' })]));
+    tasksRepo.listVisibleTasks.mockResolvedValueOnce(ok([]));
     quickNotesRepo.listQuickNotes.mockResolvedValueOnce(ok([]));
     signIn('user-b');
 
@@ -275,18 +275,18 @@ describe('CloudSyncProvider', () => {
     let resolveStale: ((result: RepositoryResult<CloudProject[]>) => void) | undefined;
     let resolveFresh: ((result: RepositoryResult<CloudProject[]>) => void) | undefined;
 
-    projectsRepo.listProjects
+    projectsRepo.listVisibleProjects
       .mockImplementationOnce(() => new Promise((resolve) => { resolveStale = resolve; }))
       .mockImplementationOnce(() => new Promise((resolve) => { resolveFresh = resolve; }));
-    tasksRepo.listTasks.mockResolvedValue(ok([]));
+    tasksRepo.listVisibleTasks.mockResolvedValue(ok([]));
     quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
     signIn('user-1');
 
-    // First attempt is now in flight (its listProjects call is parked on resolveStale).
-    await waitFor(() => expect(projectsRepo.listProjects).toHaveBeenCalledTimes(1));
+    // First attempt is now in flight (its listVisibleProjects call is parked on resolveStale).
+    await waitFor(() => expect(projectsRepo.listVisibleProjects).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('status').textContent).toBe('loading');
 
     // Retry before the first attempt resolves. This must cancel the first
@@ -294,7 +294,7 @@ describe('CloudSyncProvider', () => {
     act(() => {
       screen.getByRole('button', { name: 'retry' }).click();
     });
-    await waitFor(() => expect(projectsRepo.listProjects).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(projectsRepo.listVisibleProjects).toHaveBeenCalledTimes(2));
 
     // The newer (second) request resolves first, with the "fresh" project.
     await act(async () => {
@@ -326,7 +326,7 @@ describe('CloudSyncProvider — returning device (already established)', () => {
 
   it('safely refreshes when the cloud is newer (Device A write reaches Device B on startup)', async () => {
     seedEstablished(populatedLocal(), '2026-08-29T00:00:00.000Z');
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Renamed on Device A' })]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject({ name: 'Renamed on Device A' })]));
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
@@ -345,7 +345,7 @@ describe('CloudSyncProvider — returning device (already established)', () => {
 
   it('reports up-to-date with nothing changed when the cloud matches what this device already has', async () => {
     seedEstablished(populatedLocal(), '2026-08-30T01:00:00.000Z');
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject()]));
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
@@ -364,7 +364,7 @@ describe('CloudSyncProvider — returning device (already established)', () => {
     metadata = { ...metadata, dirty: { ...metadata.dirty, project: ['proj-1'] } };
     saveSyncMetadataStore(upsertAccountMetadata(loadSyncMetadataStore(), metadata));
 
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Cloud disagrees' })]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject({ name: 'Cloud disagrees' })]));
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
@@ -383,7 +383,7 @@ describe('CloudSyncProvider — returning device (already established)', () => {
     metadata = { ...metadata, dirty: { ...metadata.dirty, project: ['proj-1'] } };
     saveSyncMetadataStore(upsertAccountMetadata(loadSyncMetadataStore(), metadata));
 
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Cloud disagrees' })]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject({ name: 'Cloud disagrees' })]));
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId('status').textContent).not.toBe('loading'));
@@ -415,8 +415,8 @@ describe('CloudSyncProvider — a Quick Notes outage never blocks the rest of th
   // lasted — even though their own reads succeeded.
 
   it('still hydrates projects and tasks from the cloud when Quick Notes alone fails to load', async () => {
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject()]));
-    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask()]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject()]));
+    tasksRepo.listVisibleTasks.mockResolvedValue(ok([cloudTask()]));
     quickNotesRepo.listQuickNotes.mockResolvedValue(
       err('database', "Could not find the table 'public.quick_notes' in the schema cache"),
     );
@@ -441,7 +441,7 @@ describe('CloudSyncProvider — a Quick Notes outage never blocks the rest of th
     metadata = setRecordUpdatedAt(metadata, 'project', 'proj-1', '2026-08-29T00:00:00.000Z');
     saveSyncMetadataStore(upsertAccountMetadata(loadSyncMetadataStore(), metadata));
 
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject({ name: 'Renamed on another device' })]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject({ name: 'Renamed on another device' })]));
     quickNotesRepo.listQuickNotes.mockResolvedValue(
       err('database', "Could not find the table 'public.quick_notes' in the schema cache"),
     );
@@ -460,7 +460,7 @@ describe('CloudSyncProvider — a Quick Notes outage never blocks the rest of th
   });
 
   it('clears quickNotesError once Quick Notes loads successfully again', async () => {
-    projectsRepo.listProjects.mockResolvedValue(ok([]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([]));
     quickNotesRepo.listQuickNotes.mockResolvedValue(ok([]));
 
     renderApp();

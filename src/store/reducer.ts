@@ -84,6 +84,21 @@ export function getArchivedProjects(projects: Project[]): Project[] {
   return projects.filter((p) => p.status === 'archived');
 }
 
+/**
+ * True only when this Project is visible through shared-Project membership —
+ * a real, different, known owner, never this account's own legacy/private
+ * data. `accountId` absent (signed out, or Supabase not configured — no
+ * sharing concept applies at all) or `project.ownerId` absent (a purely
+ * local Project, or one that predates ownerId) both correctly return
+ * `false`: the same "no ownerId means treat as mine" default used
+ * throughout the sync layer (see src/sync/refreshFromCloud.ts's
+ * isSharedRecord). Owner-only UI (archive/restore/delete/manage sharing)
+ * should render only when this is `false`.
+ */
+export function isSharedProject(project: Project, accountId: string | null | undefined): boolean {
+  return project.ownerId !== undefined && project.ownerId !== accountId;
+}
+
 /** Goals hide 'abandoned' from the default list view, mirroring getVisibleProjects. */
 export function getVisibleGoals(goals: Goal[]): Goal[] {
   return goals.filter((g) => g.status !== 'abandoned');
@@ -340,6 +355,22 @@ function updateTaskList(tasks: Task[], id: string, updater: (t: Task) => Task): 
   return tasks.map((t) => (t.id === id ? updater(t) : t));
 }
 
+/**
+ * A Task's `ownerId` is never chosen by the caller — it is always derived
+ * from its parent Project's own `ownerId`, the one authoritative source
+ * (mirrors the database's own tasks_project_fk: a Task can only ever belong
+ * to a Project owned by the same account). Undefined `projectId` (no
+ * Project) or a Project with no known `ownerId` yet (a private Project that
+ * predates cloud sync, or one never hydrated with owner information) both
+ * correctly yield `undefined` here — the existing "no ownerId means treat as
+ * this device's own account" behavior (src/repository/*Repository.ts), not a
+ * guess at who owns it.
+ */
+function deriveTaskOwnerId(projects: Project[], projectId: string | undefined): string | undefined {
+  if (!projectId) return undefined;
+  return projects.find((p) => p.id === projectId)?.ownerId;
+}
+
 export function enforcePrimaryCap(tasks: Task[]): Task[] {
   const primaries = getActiveTasks(tasks)
     .filter((t) => t.status === 'Today' && t.isPrimary)
@@ -379,19 +410,21 @@ export function appReducer(state: AppData, action: AppAction): AppData {
 
     case 'ADD_TASK': {
       const status = action.status ?? 'Inbox';
+      const projectId = action.projectId || undefined;
       const task: Task = {
         id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
         title: action.title.trim(),
         notes: action.notes?.trim() || undefined,
         status,
         priority: action.priority ?? 'Normal',
-        projectId: action.projectId || undefined,
+        projectId,
         dueDate: action.dueDate || undefined,
         dueTime: action.dueDate ? action.dueTime || undefined : undefined,
         createdAt: new Date().toISOString(),
         sortOrder: nextSortOrder(state.tasks, status),
         isPrimary: false,
         archived: false,
+        ownerId: deriveTaskOwnerId(state.projects, projectId),
       };
       if (!task.title) return state;
       return { ...state, tasks: [...state.tasks, task] };
@@ -402,6 +435,12 @@ export function appReducer(state: AppData, action: AppAction): AppData {
       let tasks = updateTaskList(state.tasks, id, (t) => {
         const next: Task = { ...t, ...updates };
         if (updates.projectId === '') next.projectId = undefined;
+        // Re-derive ownerId only when the Project assignment itself changed —
+        // every other update (title, status, priority, ...) must leave a
+        // previously-set, cloud-provided ownerId exactly as it was.
+        if ('projectId' in updates) {
+          next.ownerId = deriveTaskOwnerId(state.projects, next.projectId);
+        }
         if (updates.status && updates.status !== 'Today' && t.isPrimary) {
           next.isPrimary = false;
         }

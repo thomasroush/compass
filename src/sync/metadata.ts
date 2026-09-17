@@ -119,6 +119,31 @@ export function clearDirty(metadata: AccountSyncMetadata, entity: SyncEntity, id
 }
 
 /**
+ * Removes a record's sync bookkeeping entirely for this account — both its
+ * last-known-server-state baseline (`records[entity][id]`) and any pending
+ * dirty marker — rather than clearing just one of the two the way ordinary
+ * sync completion does. Used only when a record has been removed from local
+ * AppData because access to it was revoked (a shared Project or Task this
+ * account is no longer a member of, or a shared Task whose Project was
+ * revoked) — see refreshFromCloud.ts's reconciliation step. An ordinary
+ * completed sync clears just the dirty flag via `clearDirty`, keeping the
+ * baseline, because the record still exists and is still tracked; here the
+ * record itself is gone, so nothing should be left that could cause a
+ * future drain or refresh pass to try to push, pull, or otherwise resurrect
+ * this id again.
+ */
+export function forgetRecord(metadata: AccountSyncMetadata, entity: SyncEntity, id: string): AccountSyncMetadata {
+  if (!(id in metadata.records[entity]) && !metadata.dirty[entity].includes(id)) return metadata;
+  const remainingRecords = { ...metadata.records[entity] };
+  delete remainingRecords[id];
+  return {
+    ...metadata,
+    records: { ...metadata.records, [entity]: remainingRecords },
+    dirty: { ...metadata.dirty, [entity]: metadata.dirty[entity].filter((existing) => existing !== id) },
+  };
+}
+
+/**
  * Clears every pending dirty id for this account, across all entities.
  * Phase 5B3B: used only for RESET and IMPORT, which wholesale-replace local
  * state — whatever was previously dirty no longer corresponds to anything

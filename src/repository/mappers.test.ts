@@ -8,12 +8,16 @@ import {
   goalToInsertRow,
   goalUpdatesToRow,
   projectFromRow,
+  projectFromRowWithOwner,
+  projectInvitationFromRow,
+  projectMemberFromRow,
   projectToInsertRow,
   projectUpdatesToRow,
   targetFromRow,
   targetToInsertRow,
   targetUpdatesToRow,
   taskFromRow,
+  taskFromRowWithOwner,
   taskToInsertRow,
   taskUpdatesToRow,
 } from './mappers';
@@ -517,5 +521,135 @@ describe('target mapping', () => {
     expect(targetUpdatesToRow({ archived: true })).toEqual({ archived: true });
     expect(targetUpdatesToRow({ currentValue: 42 })).toEqual({ current_value: 42 });
     expect(targetUpdatesToRow({})).toEqual({});
+  });
+});
+
+describe('project mapping — with owner', () => {
+  it('maps user_id to ownerId, alongside every field projectFromRow already maps', () => {
+    const cloud = projectFromRowWithOwner({
+      id: 'p1',
+      user_id: 'owner-1',
+      name: 'Shared project',
+      description: null,
+      status: 'active',
+      priority_rank: null,
+      updated_at: 'ts',
+    });
+    expect(cloud.ownerId).toBe('owner-1');
+    expect(cloud).toEqual({
+      id: 'p1',
+      name: 'Shared project',
+      description: undefined,
+      status: 'active',
+      priorityRank: undefined,
+      updatedAt: 'ts',
+      ownerId: 'owner-1',
+    });
+  });
+
+  it('never assumes ownerId equals any particular id — it is exactly the row\'s own user_id', () => {
+    const cloud = projectFromRowWithOwner({
+      id: 'p1',
+      user_id: 'someone-elses-id',
+      name: 'Shared project',
+      description: null,
+      status: 'active',
+      priority_rank: null,
+      updated_at: 'ts',
+    });
+    expect(cloud.ownerId).toBe('someone-elses-id');
+  });
+});
+
+describe('task mapping — with owner', () => {
+  it('maps user_id to ownerId, alongside every field taskFromRow already maps', () => {
+    const cloud = taskFromRowWithOwner({
+      id: 't1',
+      user_id: 'owner-1',
+      title: 'Buy milk',
+      notes: null,
+      status: 'Inbox',
+      project_id: 'p1',
+      priority: 'Normal',
+      due_date: null,
+      due_time: null,
+      created_at: 'ts',
+      completed_at: null,
+      sort_order: 0,
+      is_primary: false,
+      archived: false,
+      updated_at: 'ts',
+    });
+    expect(cloud.ownerId).toBe('owner-1');
+    expect(cloud.projectId).toBe('p1');
+  });
+});
+
+describe('project member mapping', () => {
+  it('maps a full row to the app shape, including member_email', () => {
+    const member = projectMemberFromRow({
+      owner_id: 'owner-1',
+      project_id: 'p1',
+      member_id: 'editor-1',
+      member_email: 'editor@example.com',
+      role: 'editor',
+      created_at: '2026-09-16T00:00:00.000Z',
+    });
+    expect(member).toEqual({
+      ownerId: 'owner-1',
+      projectId: 'p1',
+      memberId: 'editor-1',
+      memberEmail: 'editor@example.com',
+      role: 'editor',
+      createdAt: '2026-09-16T00:00:00.000Z',
+    });
+  });
+
+  it('maps a null member_email to undefined, not null (a membership row that predates this column)', () => {
+    const member = projectMemberFromRow({
+      owner_id: 'owner-1',
+      project_id: 'p1',
+      member_id: 'editor-1',
+      member_email: null,
+      role: 'editor',
+      created_at: 'ts',
+    });
+    expect(member.memberEmail).toBeUndefined();
+  });
+});
+
+describe('project invitation mapping', () => {
+  it('maps a full row to the app shape, preserving responded_at', () => {
+    const invitation = projectInvitationFromRow({
+      id: 'inv-1',
+      owner_id: 'owner-1',
+      project_id: 'p1',
+      invited_email: 'editor@example.com',
+      status: 'accepted',
+      created_at: '2026-09-16T00:00:00.000Z',
+      responded_at: '2026-09-16T01:00:00.000Z',
+    });
+    expect(invitation).toEqual({
+      id: 'inv-1',
+      ownerId: 'owner-1',
+      projectId: 'p1',
+      invitedEmail: 'editor@example.com',
+      status: 'accepted',
+      createdAt: '2026-09-16T00:00:00.000Z',
+      respondedAt: '2026-09-16T01:00:00.000Z',
+    });
+  });
+
+  it('maps a null responded_at to undefined, not null (still pending, or a revoke)', () => {
+    const invitation = projectInvitationFromRow({
+      id: 'inv-1',
+      owner_id: 'owner-1',
+      project_id: 'p1',
+      invited_email: 'editor@example.com',
+      status: 'pending',
+      created_at: 'ts',
+      responded_at: null,
+    });
+    expect(invitation.respondedAt).toBeUndefined();
   });
 });

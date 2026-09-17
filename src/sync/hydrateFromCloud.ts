@@ -1,9 +1,9 @@
 import type { AppData } from '../types';
 import { listQuickNotes } from '../repository/quickNotesRepository';
 import { listGoals } from '../repository/goalsRepository';
-import { listProjects } from '../repository/projectsRepository';
+import { listVisibleProjects } from '../repository/projectsRepository';
 import { listTargets } from '../repository/targetsRepository';
-import { listTasks } from '../repository/tasksRepository';
+import { listVisibleTasks } from '../repository/tasksRepository';
 import type { CloudQuickNote, CloudGoal, CloudProject, CloudTarget, CloudTask } from '../repository/types';
 import { decideHydration, type EntityCounts, type HydrationDecision } from './hydration';
 
@@ -16,9 +16,19 @@ import { decideHydration, type EntityCounts, type HydrationDecision } from './hy
  * This module only ever reads from Supabase. It never calls a create/update/
  * upsert/delete repository function, so it cannot write or overwrite a cloud
  * record. Like every function in `src/repository/`, it never accepts a user
- * id — `listProjects`/`listTasks`/`listQuickNotes` each resolve `user_id`
- * solely from the live Supabase session, so there is no parameter through
- * which a caller could request another user's data.
+ * id — `listVisibleProjects`/`listVisibleTasks`/`listQuickNotes` each resolve
+ * identity solely from the live Supabase session, so there is no parameter
+ * through which a caller could request another user's data; RLS is what
+ * decides which rows a visible read is allowed to return (this account's own,
+ * plus any shared Project/Task granted through accepted membership — see
+ * supabase/migrations/20260916120000_add_shared_project_membership.sql).
+ * Goals/Targets/Quick Notes are unaffected — still owner-only reads, so this
+ * never exposes another account's Goals, Targets, or Quick Notes.
+ *
+ * A full hydration is a wholesale replace (`LOAD` — see decideHydration), so
+ * a shared Project/Task this account can no longer see simply isn't part of
+ * the fresh snapshot built here; unlike `refreshFromCloud.ts`'s incremental
+ * merge, there is no separate removal step to write for this path.
  */
 
 export interface HydratedCloudData {
@@ -122,8 +132,8 @@ export async function hydrateFromCloud(
   // are core account data and this function still refuses to guess about
   // them.
   const [projectsResult, tasksResult, goalsResult, targetsResult, notesResult] = await Promise.all([
-    listProjects(),
-    listTasks(),
+    listVisibleProjects(),
+    listVisibleTasks(),
     listGoals(),
     listTargets(),
     listQuickNotes(),

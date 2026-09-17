@@ -19,6 +19,7 @@ import {
   createTask,
   deleteTask,
   listTasks,
+  listVisibleTasks,
   updateTask,
   updateTaskGuarded,
   upsertTask,
@@ -34,6 +35,7 @@ interface MockBuilder {
   delete: ReturnType<typeof vi.fn>;
   single: ReturnType<typeof vi.fn>;
   maybeSingle: ReturnType<typeof vi.fn>;
+  setHeader: ReturnType<typeof vi.fn>;
   then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
 }
 
@@ -49,6 +51,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): MockBuilder {
   builder.delete = vi.fn(self);
   builder.single = vi.fn(self);
   builder.maybeSingle = vi.fn(self);
+  builder.setHeader = vi.fn(self);
   builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
   return builder;
 }
@@ -152,6 +155,53 @@ describe('listTasks', () => {
   });
 });
 
+describe('listVisibleTasks', () => {
+  it('selects user_id and maps it to ownerId, issuing no user_id filter of its own', async () => {
+    signIn('editor-1');
+    const builder = makeBuilder({
+      data: [
+        {
+          id: 't1',
+          user_id: 'owner-1',
+          title: 'Buy milk',
+          notes: null,
+          status: 'Inbox',
+          project_id: 'p1',
+          priority: 'Normal',
+          due_date: null,
+          due_time: null,
+          created_at: 'ts',
+          completed_at: null,
+          sort_order: 0,
+          is_primary: false,
+          archived: false,
+          updated_at: 'ts',
+        },
+      ],
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const result = await listVisibleTasks();
+
+    expect(from).toHaveBeenCalledWith('tasks');
+    expect(builder.select).toHaveBeenCalledWith(expect.stringContaining('user_id'));
+    expect(builder.eq).not.toHaveBeenCalledWith('user_id', expect.anything());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data[0].ownerId).toBe('owner-1');
+      expect(result.data[0].projectId).toBe('p1');
+    }
+  });
+
+  it('rejects without a session, and never queries the database', async () => {
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const result = await listVisibleTasks();
+    expect(result.ok).toBe(false);
+    expect(from).not.toHaveBeenCalled();
+  });
+});
+
 describe('createTask', () => {
   it('inserts a row owned by the authenticated user, preserving the client-generated id', async () => {
     signIn('user-1');
@@ -221,6 +271,41 @@ describe('createTask', () => {
   it('fails closed with account-mismatch, and never queries the database, when the live session belongs to a different account', async () => {
     signIn('user-2');
     const result = await createTask(sampleTask, 'user-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('account-mismatch');
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('stores a shared Task under ownerId, not the acting Editor\'s own id, avoiding a duplicate owned by the Editor', async () => {
+    signIn('editor-1');
+    const builder = makeBuilder({
+      data: {
+        id: 't1',
+        title: 'Buy milk',
+        notes: null,
+        status: 'Inbox',
+        project_id: 'p1',
+        priority: 'Normal',
+        due_date: null,
+        created_at: '2026-08-30T00:00:00.000Z',
+        completed_at: null,
+        sort_order: 0,
+        is_primary: false,
+        archived: false,
+        updated_at: 'ts',
+      },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    await createTask({ ...sampleTask, projectId: 'p1' }, 'editor-1', 'owner-1');
+
+    expect(builder.insert).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'owner-1' }));
+  });
+
+  it('verifies the acting Editor\'s own session identity via expectedAccountId, never ownerId', async () => {
+    signIn('someone-else');
+    const result = await createTask(sampleTask, 'editor-1', 'owner-1');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
@@ -348,6 +433,34 @@ describe('updateTask', () => {
     if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
   });
+
+  it('targets the shared Task\'s real owner when ownerId is given, while authenticating as the acting Editor', async () => {
+    signIn('editor-1');
+    const builder = makeBuilder({
+      data: {
+        id: 't1',
+        title: 'Buy milk',
+        notes: null,
+        status: 'Done',
+        project_id: 'p1',
+        priority: 'Normal',
+        due_date: null,
+        created_at: 'ts',
+        completed_at: null,
+        sort_order: 0,
+        is_primary: false,
+        archived: false,
+        updated_at: 'ts2',
+      },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    await updateTask('t1', { status: 'Done' }, 'editor-1', 'owner-1');
+
+    expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'owner-1');
+    expect(builder.eq).toHaveBeenNthCalledWith(2, 'id', 't1');
+  });
 });
 
 describe('updateTaskGuarded', () => {
@@ -423,6 +536,46 @@ describe('updateTaskGuarded', () => {
     if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
   });
+
+  it('targets the shared Task\'s real owner when ownerId is given, preserving the compare-and-swap on updated_at', async () => {
+    signIn('editor-1');
+    const builder = makeBuilder({
+      data: {
+        id: 't1',
+        title: 'Buy milk',
+        notes: null,
+        status: 'Done',
+        project_id: 'p1',
+        priority: 'Normal',
+        due_date: null,
+        created_at: 'ts',
+        completed_at: null,
+        sort_order: 0,
+        is_primary: false,
+        archived: false,
+        updated_at: 'ts2',
+      },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'ts1', 'editor-1', 'owner-1');
+
+    expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'owner-1');
+    expect(builder.eq).toHaveBeenNthCalledWith(2, 'id', 't1');
+    expect(builder.eq).toHaveBeenNthCalledWith(3, 'updated_at', 'ts1');
+    expect(result.ok).toBe(true);
+  });
+
+  it('still reports a typed conflict (not an account/permission error) when ownerId is given and the row changed', async () => {
+    signIn('editor-1');
+    from.mockReturnValue(makeBuilder({ data: null, error: null }));
+
+    const result = await updateTaskGuarded('t1', { status: 'Done' }, 'stale', 'editor-1', 'owner-1');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.type).toBe('conflict');
+  });
 });
 
 describe('deleteTask', () => {
@@ -453,5 +606,17 @@ describe('deleteTask', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.type).toBe('account-mismatch');
     expect(from).not.toHaveBeenCalled();
+  });
+
+  it('targets the shared Task\'s real owner when ownerId is given, while authenticating as the acting Editor', async () => {
+    signIn('editor-1');
+    const builder = makeBuilder({ data: null, error: null });
+    from.mockReturnValue(builder);
+
+    const result = await deleteTask('t1', 'editor-1', 'owner-1');
+
+    expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'owner-1');
+    expect(builder.eq).toHaveBeenNthCalledWith(2, 'id', 't1');
+    expect(result.ok).toBe(true);
   });
 });

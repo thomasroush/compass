@@ -5,6 +5,7 @@ import {
   countDirty,
   createEmptyAccountMetadata,
   createEmptySyncMetadataStore,
+  forgetRecord,
   getAccountMetadata,
   getRecordUpdatedAt,
   hasDirtyWork,
@@ -99,6 +100,46 @@ describe('record and dirty helpers', () => {
     metadata = clearAllDirty(metadata);
 
     expect(metadata.dirty).toEqual({ project: [], task: [], quickNote: [], goal: [], target: [] });
+  });
+
+  it('forgetRecord removes both the baseline and the dirty marker for a removed shared record', () => {
+    let metadata = createEmptyAccountMetadata('acct-1');
+    metadata = setRecordUpdatedAt(metadata, 'project', 'p1', '2026-09-16T00:00:00.000Z');
+    metadata = markDirty(metadata, 'project', 'p1');
+
+    metadata = forgetRecord(metadata, 'project', 'p1');
+
+    expect(getRecordUpdatedAt(metadata, 'project', 'p1')).toBeUndefined();
+    expect(isDirty(metadata, 'project', 'p1')).toBe(false);
+    expect(metadata.records.project).not.toHaveProperty('p1');
+  });
+
+  it('forgetRecord on a record with only a baseline (never dirty) still removes the baseline', () => {
+    let metadata = createEmptyAccountMetadata('acct-1');
+    metadata = setRecordUpdatedAt(metadata, 'task', 't1', 'ts');
+
+    metadata = forgetRecord(metadata, 'task', 't1');
+
+    expect(getRecordUpdatedAt(metadata, 'task', 't1')).toBeUndefined();
+  });
+
+  it('forgetRecord leaves every other record and entity untouched', () => {
+    let metadata = createEmptyAccountMetadata('acct-1');
+    metadata = setRecordUpdatedAt(metadata, 'task', 't1', 'ts1');
+    metadata = setRecordUpdatedAt(metadata, 'task', 't2', 'ts2');
+    metadata = markDirty(metadata, 'task', 't2');
+    metadata = setRecordUpdatedAt(metadata, 'project', 'p1', 'ts3');
+
+    metadata = forgetRecord(metadata, 'task', 't1');
+
+    expect(getRecordUpdatedAt(metadata, 'task', 't2')).toBe('ts2');
+    expect(isDirty(metadata, 'task', 't2')).toBe(true);
+    expect(getRecordUpdatedAt(metadata, 'project', 'p1')).toBe('ts3');
+  });
+
+  it('forgetRecord is a safe no-op for an id with no baseline and no dirty marker', () => {
+    const metadata = createEmptyAccountMetadata('acct-1');
+    expect(forgetRecord(metadata, 'task', 'never-existed')).toEqual(metadata);
   });
 
   it('hasDirtyWork/countDirty reflect the total across all entities', () => {

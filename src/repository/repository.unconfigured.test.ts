@@ -5,13 +5,13 @@ vi.mock('../lib/supabaseClient', () => ({
   isSupabaseConfigured: false,
 }));
 
-import { listProjects } from './projectsRepository';
-import { listTasks } from './tasksRepository';
+import { listProjects, listVisibleProjects } from './projectsRepository';
+import { listTasks, listVisibleTasks } from './tasksRepository';
 import { listQuickNotes } from './quickNotesRepository';
 
 describe('repositories when Supabase is not configured', () => {
   it('every list function returns a typed unconfigured error instead of throwing or hitting the network', async () => {
-    for (const list of [listProjects, listTasks, listQuickNotes]) {
+    for (const list of [listProjects, listVisibleProjects, listTasks, listVisibleTasks, listQuickNotes]) {
       const result = await list();
       expect(result.ok).toBe(false);
       if (!result.ok) {

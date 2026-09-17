@@ -1,8 +1,8 @@
 import { createQuickNote, listQuickNotes, updateQuickNoteGuarded } from '../repository/quickNotesRepository';
 import { createGoal, listGoals, updateGoalGuarded } from '../repository/goalsRepository';
-import { createProject, listProjects, updateProjectGuarded } from '../repository/projectsRepository';
+import { createProject, listVisibleProjects, updateProjectGuarded } from '../repository/projectsRepository';
 import { createTarget, listTargets, updateTargetGuarded } from '../repository/targetsRepository';
-import { createTask, listTasks, updateTaskGuarded } from '../repository/tasksRepository';
+import { createTask, listVisibleTasks, updateTaskGuarded } from '../repository/tasksRepository';
 import type { RepositoryError, RepositoryResult } from '../repository/types';
 import type { AppData, QuickNote, Goal, Project, Target, Task } from '../types';
 import {
@@ -143,6 +143,22 @@ function patchMetadata(
   return nextStore;
 }
 
+/**
+ * A Task's `ownerId` for write purposes is always derived fresh from its
+ * current parent Project — never trusted from the Task's own `ownerId`
+ * field, which could in principle be stale or (for a brand-new Task) not
+ * yet stamped at all. The Project is the one authoritative source, mirroring
+ * both the database's own tasks_project_fk and reducer.ts's
+ * deriveTaskOwnerId, which keeps the local cache consistent with this same
+ * rule. A Task with no `projectId`, or whose Project carries no known
+ * `ownerId` (a private Project, or one from before Stage 3), resolves to
+ * `accountId` — unchanged, existing private-Task behavior.
+ */
+function resolveTaskOwnerId(task: Task, projects: Project[], accountId: string): string {
+  if (!task.projectId) return accountId;
+  return projects.find((p) => p.id === task.projectId)?.ownerId ?? accountId;
+}
+
 async function syncProject(
   id: string,
   accountId: string,
@@ -162,6 +178,11 @@ async function syncProject(
 
   let result: RepositoryResult<{ updatedAt: string }>;
   if (knownUpdatedAt) {
+    // `before.ownerId` — the real database owner this Project was last read
+    // with — targets a shared Project's actual row when this account is an
+    // Editor updating it (see updateProjectGuarded's own doc comment); it is
+    // `undefined` for a private/legacy Project, which correctly falls back
+    // to `accountId` itself, unchanged from before Stage 3.
     result = await updateProjectGuarded(
       id,
       {
@@ -172,11 +193,24 @@ async function syncProject(
       },
       knownUpdatedAt,
       accountId,
+      before.ownerId,
     );
   } else {
+    // Reaching here with a shared Project (ownerId set to someone else)
+    // should not happen — only the Owner can ever create a Project, and a
+    // shared Project only ever enters local state already-hydrated (with a
+    // known baseline) via listVisibleProjects, never through ADD_PROJECT.
+    // createProject has no ownerId parameter for exactly this reason: this
+    // branch is reached only for a genuinely new, self-owned Project.
     result = await createProject(before, accountId);
     if (!result.ok && result.error.type === 'duplicate') {
-      return resolveDuplicateCreate('project', id, accountId, before, listProjects);
+      // listVisibleProjects, not listProjects: the conflicting row a
+      // duplicate-id error implies could in principle belong to a different
+      // owner than accountId (see listTasks's matching comment below) —
+      // using the visible read here is strictly a superset of what the
+      // owner-only read would find, so this is safe for the ordinary
+      // private-Project case too.
+      return resolveDuplicateCreate('project', id, accountId, before, listVisibleProjects);
     }
   }
 
@@ -190,6 +224,7 @@ async function syncTask(id: string, accountId: string, getLocalState: () => AppD
     return { kind: 'skipped-missing' };
   }
 
+  const ownerId = resolveTaskOwnerId(before, getLocalState().projects, accountId);
   const knownUpdatedAt = getRecordUpdatedAt(getAccountMetadata(loadSyncMetadataStore(), accountId), 'task', id);
 
   let result: RepositoryResult<{ updatedAt: string }>;
@@ -197,11 +232,23 @@ async function syncTask(id: string, accountId: string, getLocalState: () => AppD
     const { id: _id, createdAt: _createdAt, ...updates } = before;
     void _id;
     void _createdAt;
-    result = await updateTaskGuarded(id, updates, knownUpdatedAt, accountId);
+    result = await updateTaskGuarded(id, updates, knownUpdatedAt, accountId, ownerId);
   } else {
-    result = await createTask(before, accountId);
+    // A newly created Task inside a shared Project reaches here (unlike
+    // Projects, Editors do create Tasks) — `ownerId` is the shared
+    // Project's real owner, resolved above from the Project itself, never
+    // from a value the Task happened to carry; createTask stores the new
+    // row under that owner's user_id, matching every other Task the Owner
+    // creates themselves, rather than forking a copy under this account.
+    result = await createTask(before, accountId, ownerId);
     if (!result.ok && result.error.type === 'duplicate') {
-      return resolveDuplicateCreate('task', id, accountId, before, listTasks);
+      // listVisibleTasks, not listTasks: a duplicate-id error's existing row
+      // could belong to a different owner (the shared Project's Owner) than
+      // accountId — an owner-only read would never find it, silently
+      // leaving this stuck as an unresolved conflict. listVisibleTasks is a
+      // strict superset of the owner-only read, so this is equally correct
+      // for an ordinary private Task's duplicate.
+      return resolveDuplicateCreate('task', id, accountId, before, listVisibleTasks);
     }
   }
 

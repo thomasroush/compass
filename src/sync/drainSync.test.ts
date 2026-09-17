@@ -22,12 +22,12 @@ import { clearSyncMetadataStore, loadSyncMetadataStore, saveSyncMetadataStore } 
 const projectsRepo = vi.hoisted(() => ({
   createProject: vi.fn(),
   updateProjectGuarded: vi.fn(),
-  listProjects: vi.fn(),
+  listVisibleProjects: vi.fn(),
 }));
 const tasksRepo = vi.hoisted(() => ({
   createTask: vi.fn(),
   updateTaskGuarded: vi.fn(),
-  listTasks: vi.fn(),
+  listVisibleTasks: vi.fn(),
 }));
 const quickNotesRepo = vi.hoisted(() => ({
   createQuickNote: vi.fn(),
@@ -145,7 +145,7 @@ describe('drainDirtyWork — create path (unknown record)', () => {
 
     const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ tasks: [t] }));
 
-    expect(tasksRepo.createTask).toHaveBeenCalledWith(t, ACCOUNT);
+    expect(tasksRepo.createTask).toHaveBeenCalledWith(t, ACCOUNT, ACCOUNT);
     expect(tasksRepo.updateTaskGuarded).not.toHaveBeenCalled();
     expect(result.outcomes).toEqual([{ kind: 'synced' }]);
 
@@ -182,6 +182,7 @@ describe('drainDirtyWork — update path (known record) and full-record push', (
       expect.objectContaining({ title: 'Renamed', status: 'Today', isPrimary: true, notes: 'a note' }),
       'server-ts-1',
       ACCOUNT,
+      ACCOUNT,
     );
     const meta = getAccountMetadata(loadSyncMetadataStore(), ACCOUNT);
     expect(meta.records.task[t.id]?.lastKnownUpdatedAt).toBe('server-ts-2');
@@ -200,6 +201,7 @@ describe('drainDirtyWork — update path (known record) and full-record push', (
       expect.objectContaining({ priorityRank: 2 }),
       'server-ts-1',
       ACCOUNT,
+      undefined,
     );
   });
 
@@ -229,7 +231,7 @@ describe('drainDirtyWork — coalescing rapid edits', () => {
     await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ tasks: [finalTask] }));
 
     expect(tasksRepo.createTask).toHaveBeenCalledTimes(1);
-    expect(tasksRepo.createTask).toHaveBeenCalledWith(finalTask, ACCOUNT);
+    expect(tasksRepo.createTask).toHaveBeenCalledWith(finalTask, ACCOUNT, ACCOUNT);
   });
 
   it('coalesces repeated updates to an already-known record into one push of the final state', async () => {
@@ -244,6 +246,7 @@ describe('drainDirtyWork — coalescing rapid edits', () => {
       t.id,
       expect.objectContaining({ title: 'v3' }),
       'server-ts-1',
+      ACCOUNT,
       ACCOUNT,
     );
   });
@@ -301,7 +304,7 @@ describe('drainDirtyWork — conflict', () => {
     const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ tasks: [t1, t2] }));
 
     expect(result.stoppedEarly).toBe(false);
-    expect(tasksRepo.createTask).toHaveBeenCalledWith(t2, ACCOUNT);
+    expect(tasksRepo.createTask).toHaveBeenCalledWith(t2, ACCOUNT, ACCOUNT);
     expect(result.outcomes.map((o) => o.kind)).toEqual(['conflict', 'synced']);
   });
 });
@@ -377,7 +380,7 @@ describe('drainDirtyWork — duplicate-create resolution (Risk 1)', () => {
     const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ tasks: [t] }));
 
     expect(result.outcomes).toEqual([{ kind: 'record-error', message: expect.any(String) }]);
-    expect(tasksRepo.listTasks).not.toHaveBeenCalled();
+    expect(tasksRepo.listVisibleTasks).not.toHaveBeenCalled();
     const meta = getAccountMetadata(loadSyncMetadataStore(), ACCOUNT);
     expect(meta.dirty.task).toEqual([t.id]);
   });
@@ -388,7 +391,7 @@ describe('drainDirtyWork — duplicate-create resolution (Risk 1)', () => {
     tasksRepo.createTask.mockResolvedValue(err('duplicate', 'duplicate key value violates unique constraint "tasks_pkey"'));
     // The cloud row already holds exactly what this device wanted to write —
     // the earlier create actually succeeded, only its response was lost.
-    tasksRepo.listTasks.mockResolvedValue(ok([cloudTask(t, { updatedAt: 'cloud-ts' })]));
+    tasksRepo.listVisibleTasks.mockResolvedValue(ok([cloudTask(t, { updatedAt: 'cloud-ts' })]));
 
     const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ tasks: [t] }));
 
@@ -403,7 +406,7 @@ describe('drainDirtyWork — duplicate-create resolution (Risk 1)', () => {
     const cloud = cloudTask(task({ title: 'Someone else already wrote this' }), { updatedAt: 'cloud-ts' });
     dirtyMetadata((m) => markDirty(m, 'task', local.id));
     tasksRepo.createTask.mockResolvedValue(err('duplicate', 'duplicate key value violates unique constraint "tasks_pkey"'));
-    tasksRepo.listTasks.mockResolvedValue(ok([cloud]));
+    tasksRepo.listVisibleTasks.mockResolvedValue(ok([cloud]));
 
     const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ tasks: [local] }));
 
@@ -422,7 +425,7 @@ describe('drainDirtyWork — duplicate-create resolution (Risk 1)', () => {
     const t = task();
     dirtyMetadata((m) => markDirty(m, 'task', t.id));
     tasksRepo.createTask.mockResolvedValue(err('duplicate', 'duplicate key value violates unique constraint "tasks_pkey"'));
-    tasksRepo.listTasks.mockResolvedValue(ok([])); // existing row not found in this read
+    tasksRepo.listVisibleTasks.mockResolvedValue(ok([])); // existing row not found in this read
 
     const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ tasks: [t] }));
 
@@ -436,7 +439,7 @@ describe('drainDirtyWork — duplicate-create resolution (Risk 1)', () => {
     const p = project({ name: 'Home' });
     dirtyMetadata((m) => markDirty(m, 'project', p.id));
     projectsRepo.createProject.mockResolvedValue(err('duplicate', 'duplicate key'));
-    projectsRepo.listProjects.mockResolvedValue(ok([cloudProject(p, { updatedAt: 'p-ts' })]));
+    projectsRepo.listVisibleProjects.mockResolvedValue(ok([cloudProject(p, { updatedAt: 'p-ts' })]));
 
     const projectResult = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [p] }));
     expect(projectResult.outcomes).toEqual([{ kind: 'synced' }]);
@@ -646,5 +649,97 @@ describe('drainDirtyWork — Goals and Targets', () => {
 
     expect(result.stoppedEarly).toBe(false);
     expect(result.outcomes.map((o) => o.kind)).toEqual(['conflict', 'synced']);
+  });
+});
+
+describe('drainDirtyWork — shared Project/Task writes target the real Owner', () => {
+  it("a shared Project update targets the Owner's user_id, while the acting Editor remains the verified session", async () => {
+    const p = project({ ownerId: 'owner-x', name: 'Renamed by editor' });
+    dirtyMetadata((m) => markDirty(setRecordUpdatedAt(m, 'project', p.id, 'server-ts-1'), 'project', p.id));
+    projectsRepo.updateProjectGuarded.mockResolvedValue(ok(cloudProject(p, { updatedAt: 'server-ts-2' })));
+
+    const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [p] }));
+
+    expect(projectsRepo.updateProjectGuarded).toHaveBeenCalledWith(
+      p.id,
+      expect.objectContaining({ name: 'Renamed by editor' }),
+      'server-ts-1',
+      ACCOUNT,
+      'owner-x',
+    );
+    expect(result.outcomes).toEqual([{ kind: 'synced' }]);
+  });
+
+  it("a shared Task update targets the Owner, derived from its parent Project, not the acting Editor's own id", async () => {
+    const sharedProject = project({ id: 'shared-proj', ownerId: 'owner-x' });
+    const t = task({ id: 'shared-task', projectId: 'shared-proj', title: 'edited by editor' });
+    dirtyMetadata((m) => markDirty(setRecordUpdatedAt(m, 'task', t.id, 'server-ts-1'), 'task', t.id));
+    tasksRepo.updateTaskGuarded.mockResolvedValue(ok(cloudTask(t, { updatedAt: 'server-ts-2' })));
+
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [sharedProject], tasks: [t] }));
+
+    expect(tasksRepo.updateTaskGuarded).toHaveBeenCalledWith(
+      t.id,
+      expect.objectContaining({ title: 'edited by editor' }),
+      'server-ts-1',
+      ACCOUNT,
+      'owner-x',
+    );
+  });
+
+  it("a newly created Task inside a shared Project is stored under the Project Owner's user_id, not the Editor's", async () => {
+    const sharedProject = project({ id: 'shared-proj', ownerId: 'owner-x' });
+    const t = task({ id: 'new-task', projectId: 'shared-proj' });
+    dirtyMetadata((m) => markDirty(m, 'task', t.id));
+    tasksRepo.createTask.mockResolvedValue(ok(cloudTask(t)));
+
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [sharedProject], tasks: [t] }));
+
+    expect(tasksRepo.createTask).toHaveBeenCalledWith(t, ACCOUNT, 'owner-x');
+  });
+
+  it('never trusts a freely supplied ownerId already sitting on the Task — always derives it fresh from the current parent Project', async () => {
+    const sharedProject = project({ id: 'shared-proj', ownerId: 'owner-x' });
+    // The Task itself carries a bogus ownerId that does not match its Project's real owner.
+    const t = task({ id: 'new-task', projectId: 'shared-proj', ownerId: 'someone-else-entirely' });
+    dirtyMetadata((m) => markDirty(m, 'task', t.id));
+    tasksRepo.createTask.mockResolvedValue(ok(cloudTask(t)));
+
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [sharedProject], tasks: [t] }));
+
+    expect(tasksRepo.createTask).toHaveBeenCalledWith(t, ACCOUNT, 'owner-x');
+  });
+
+  it('a Task created outside any shared Project keeps existing private-Task behavior (owner is the acting account)', async () => {
+    const t = task({ id: 'private-task' }); // no projectId
+    dirtyMetadata((m) => markDirty(m, 'task', t.id));
+    tasksRepo.createTask.mockResolvedValue(ok(cloudTask(t)));
+
+    await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ tasks: [t] }));
+
+    expect(tasksRepo.createTask).toHaveBeenCalledWith(t, ACCOUNT, ACCOUNT);
+  });
+
+  it('an unauthorized shared write (access revoked) is reported through the existing conflict path, never falling back to a private duplicate', async () => {
+    const sharedProject = project({ id: 'shared-proj', ownerId: 'owner-x' });
+    const t = task({ id: 'shared-task', projectId: 'shared-proj', title: 'edit while revoked' });
+    dirtyMetadata((m) => markDirty(setRecordUpdatedAt(m, 'task', t.id, 'server-ts-1'), 'task', t.id));
+    // RLS now silently excludes the inaccessible row: the guarded update's
+    // filter matches zero rows, which updateTaskGuarded already reports as
+    // a typed 'conflict' — the same as any other stale-baseline case.
+    tasksRepo.updateTaskGuarded.mockResolvedValue(
+      err('conflict', 'This task changed on the server since it was last read on this device.'),
+    );
+
+    const result = await drainDirtyWork(ACCOUNT, alwaysCurrent, () => localData({ projects: [sharedProject], tasks: [t] }));
+
+    expect(result.outcomes).toEqual([
+      { kind: 'conflict', message: expect.stringContaining('changed on the server') },
+    ]);
+    expect(tasksRepo.createTask).not.toHaveBeenCalled();
+    const meta = getAccountMetadata(loadSyncMetadataStore(), ACCOUNT);
+    // Left dirty — a future refresh's reconciliation (not this drain pass)
+    // is what eventually removes an inaccessible shared record for good.
+    expect(meta.dirty.task).toEqual([t.id]);
   });
 });
