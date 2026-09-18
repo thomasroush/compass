@@ -12,6 +12,7 @@ function baseTask(overrides: Partial<Task> = {}): Task {
     sortOrder: 0,
     isPrimary: false,
     archived: false,
+    calendarOnly: false,
     ...overrides,
   };
 }

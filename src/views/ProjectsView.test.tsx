@@ -376,6 +376,7 @@ describe('ProjectsView — shared Projects', () => {
           sortOrder: 0,
           isPrimary: false,
           archived: false,
+          calendarOnly: false,
         },
       ],
     };

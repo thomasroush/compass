@@ -21,27 +21,29 @@ export function getActiveTasks(tasks: Task[]): Task[] {
   return tasks.filter((t) => !t.archived);
 }
 
+/** The Today dashboard is a workflow surface, same family as Board/Tasks — never shows a calendar-only task. */
 export function getTodayPrimaryTasks(tasks: Task[]): Task[] {
   return getActiveTasks(tasks)
-    .filter((t) => t.status === 'Today' && t.isPrimary)
+    .filter((t) => t.status === 'Today' && t.isPrimary && !t.calendarOnly)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 export function getTodayOtherTasks(tasks: Task[]): Task[] {
   return getActiveTasks(tasks)
-    .filter((t) => t.status === 'Today' && !t.isPrimary)
+    .filter((t) => t.status === 'Today' && !t.isPrimary && !t.calendarOnly)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 export function getOverdueTasks(tasks: Task[], today = todayDateString()): Task[] {
   return getActiveTasks(tasks)
-    .filter((t) => isOverdue(t, today))
+    .filter((t) => isOverdue(t, today) && !t.calendarOnly)
     .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''));
 }
 
+/** Board columns never show a calendar-only task — see Task.calendarOnly's doc comment. */
 export function getTasksByStatus(tasks: Task[], status: TaskStatus): Task[] {
   return getActiveTasks(tasks)
-    .filter((t) => t.status === status)
+    .filter((t) => t.status === status && !t.calendarOnly)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
@@ -54,7 +56,7 @@ export function getTasksByStatus(tasks: Task[], status: TaskStatus): Task[] {
  */
 export function getTriageTasks(tasks: Task[]): Task[] {
   return getActiveTasks(tasks)
-    .filter((t) => !t.projectId && t.priority === 'Normal' && t.status === 'Inbox')
+    .filter((t) => !t.projectId && t.priority === 'Normal' && t.status === 'Inbox' && !t.calendarOnly)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -275,6 +277,7 @@ export type TaskUpdate = Partial<
     | 'archived'
     | 'sortOrder'
     | 'completedAt'
+    | 'calendarOnly'
   >
 >;
 
@@ -297,7 +300,7 @@ export type TargetUpdate = Partial<{
 
 export type AppAction =
   | { type: 'LOAD'; data: AppData }
-  | { type: 'ADD_TASK'; id?: string; title: string; status?: TaskStatus; notes?: string; priority?: Priority; projectId?: string; dueDate?: string; dueTime?: string }
+  | { type: 'ADD_TASK'; id?: string; title: string; status?: TaskStatus; notes?: string; priority?: Priority; projectId?: string; dueDate?: string; dueTime?: string; calendarOnly?: boolean }
   | { type: 'UPDATE_TASK'; id: string; updates: TaskUpdate }
   | { type: 'COMPLETE_TASK'; id: string }
   | { type: 'UNCOMPLETE_TASK'; id: string }
@@ -411,6 +414,7 @@ export function appReducer(state: AppData, action: AppAction): AppData {
     case 'ADD_TASK': {
       const status = action.status ?? 'Inbox';
       const projectId = action.projectId || undefined;
+      const dueDate = action.dueDate || undefined;
       const task: Task = {
         id: action.id ?? (crypto.randomUUID?.() ?? `${Date.now()}`),
         title: action.title.trim(),
@@ -418,12 +422,18 @@ export function appReducer(state: AppData, action: AppAction): AppData {
         status,
         priority: action.priority ?? 'Normal',
         projectId,
-        dueDate: action.dueDate || undefined,
-        dueTime: action.dueDate ? action.dueTime || undefined : undefined,
+        dueDate,
+        dueTime: dueDate ? action.dueTime || undefined : undefined,
         createdAt: new Date().toISOString(),
         sortOrder: nextSortOrder(state.tasks, status),
         isPrimary: false,
         archived: false,
+        // Defensive guard — TaskForm already requires a due date before
+        // offering Calendar only, but a calendar-only task with no due date
+        // would be invisible everywhere (hidden from Board/Tasks by
+        // calendarOnly, absent from the Calendar's due-date grouping), so
+        // it is never allowed to exist even if some other caller asks for it.
+        calendarOnly: Boolean(action.calendarOnly) && Boolean(dueDate),
         ownerId: deriveTaskOwnerId(state.projects, projectId),
       };
       if (!task.title) return state;
@@ -449,6 +459,12 @@ export function appReducer(state: AppData, action: AppAction): AppData {
         }
         if (updates.status && updates.status !== 'Done') {
           next.completedAt = undefined;
+        }
+        // Same defensive guard as ADD_TASK: never let a task end up
+        // calendar-only with no due date (e.g. clearing dueDate in the same
+        // update that keeps calendarOnly true).
+        if (next.calendarOnly && !next.dueDate) {
+          next.calendarOnly = false;
         }
         return next;
       });
@@ -787,6 +803,7 @@ export function createTaskForTest(overrides: Partial<Task> = {}): Task {
     sortOrder: 0,
     isPrimary: false,
     archived: false,
+    calendarOnly: false,
     ...overrides,
   };
 }

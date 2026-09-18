@@ -31,6 +31,17 @@ export interface Task {
   isPrimary: boolean;
   archived: boolean;
   /**
+   * Visibility/placement flag, not a `TaskStatus` — when true, this task is
+   * hidden from the Board and Tasks/Inbox lists and shown only in the
+   * Calendar, but keeps whatever `status` it already has (workflow status
+   * and calendar-only placement are independent). Always requires `dueDate`
+   * to be set (enforced in TaskForm and defensively in the reducer, not by
+   * the database schema). Defaults to `false` for every task that predates
+   * this field, both in `localStorage` (see storage/validation.ts) and in
+   * Supabase (see the calendar_only migration's column default).
+   */
+  calendarOnly: boolean;
+  /**
    * The Supabase `user_id` that actually owns this row — the account whose
    * Project this Task belongs to, which for a shared Project's Task is the
    * Owner, not necessarily whoever is signed in right now. Undefined for a

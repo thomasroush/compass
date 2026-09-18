@@ -45,6 +45,7 @@ function seedLocalData(): AppData {
         sortOrder: 0,
         isPrimary: false,
         archived: false,
+        calendarOnly: false,
       },
     ],
     quickNotes: [

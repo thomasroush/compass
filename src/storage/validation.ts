@@ -55,6 +55,7 @@ function validateTask(value: unknown): Task | null {
   if (!isNumber(t.sortOrder)) return null;
   if (!isBoolean(t.isPrimary)) return null;
   if (!isBoolean(t.archived)) return null;
+  if (t.calendarOnly !== undefined && !isBoolean(t.calendarOnly)) return null;
   if (!isOptionalString(t.notes)) return null;
   if (t.projectId !== undefined && !isString(t.projectId)) return null;
   if (t.dueDate !== undefined && !isString(t.dueDate)) return null;
@@ -82,6 +83,9 @@ function validateTask(value: unknown): Task | null {
     sortOrder: t.sortOrder,
     isPrimary: t.isPrimary,
     archived: t.archived,
+    // Missing (predates this field) or invalid (already rejected above, so
+    // only "missing" reaches here) both default to false.
+    calendarOnly: t.calendarOnly === true,
     ownerId,
   };
 }

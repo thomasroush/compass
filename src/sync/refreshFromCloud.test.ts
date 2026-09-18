@@ -47,6 +47,7 @@ function sharedTask(overrides: Partial<Task> = {}): Task {
     sortOrder: 0,
     isPrimary: false,
     archived: false,
+    calendarOnly: false,
     projectId: 'shared-proj-1',
     ownerId: 'owner-x',
     ...overrides,

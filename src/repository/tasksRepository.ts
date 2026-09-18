@@ -11,9 +11,9 @@ import { getAuthenticatedSession, getAuthenticatedSessionFor } from './session';
 import { makeError, type CloudTask, type RepositoryResult } from './types';
 
 const TASK_COLUMNS =
-  'id,title,notes,status,project_id,priority,due_date,due_time,created_at,completed_at,sort_order,is_primary,archived,updated_at';
+  'id,title,notes,status,project_id,priority,due_date,due_time,created_at,completed_at,sort_order,is_primary,archived,calendar_only,updated_at';
 const TASK_COLUMNS_WITH_OWNER =
-  'id,user_id,title,notes,status,project_id,priority,due_date,due_time,created_at,completed_at,sort_order,is_primary,archived,updated_at';
+  'id,user_id,title,notes,status,project_id,priority,due_date,due_time,created_at,completed_at,sort_order,is_primary,archived,calendar_only,updated_at';
 
 export async function listTasks(): Promise<RepositoryResult<CloudTask[]>> {
   const session = await getAuthenticatedSession();

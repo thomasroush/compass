@@ -122,6 +122,7 @@ export interface TaskRow {
   sort_order: number;
   is_primary: boolean;
   archived: boolean;
+  calendar_only: boolean;
   updated_at: string;
 }
 
@@ -142,6 +143,7 @@ export function taskFromRow(row: TaskRow): CloudTask {
     sortOrder: row.sort_order,
     isPrimary: row.is_primary,
     archived: row.archived,
+    calendarOnly: row.calendar_only,
     updatedAt: row.updated_at,
   };
 }
@@ -171,6 +173,7 @@ export interface TaskInsertRow {
   sort_order: number;
   is_primary: boolean;
   archived: boolean;
+  calendar_only: boolean;
 }
 
 export function taskToInsertRow(userId: string, task: Task): TaskInsertRow {
@@ -189,6 +192,7 @@ export function taskToInsertRow(userId: string, task: Task): TaskInsertRow {
     sort_order: task.sortOrder,
     is_primary: task.isPrimary,
     archived: task.archived,
+    calendar_only: task.calendarOnly,
   };
 }
 
@@ -204,6 +208,7 @@ export interface TaskUpdateRow {
   sort_order?: number;
   is_primary?: boolean;
   archived?: boolean;
+  calendar_only?: boolean;
 }
 
 export function taskUpdatesToRow(updates: Partial<Omit<Task, 'id' | 'createdAt'>>): TaskUpdateRow {
@@ -227,6 +232,7 @@ export function taskUpdatesToRow(updates: Partial<Omit<Task, 'id' | 'createdAt'>
   if ('sortOrder' in updates) row.sort_order = updates.sortOrder;
   if ('isPrimary' in updates) row.is_primary = updates.isPrimary;
   if ('archived' in updates) row.archived = updates.archived;
+  if ('calendarOnly' in updates) row.calendar_only = updates.calendarOnly;
   return row;
 }
 

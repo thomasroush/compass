@@ -271,8 +271,8 @@ describe('GoalDetailView — creating each Target type', () => {
     mocks.appState.current = {
       ...mocks.appState.current,
       tasks: [
-        { id: 'task-1', title: 'Draft contract', status: 'Inbox', priority: 'Normal', createdAt: 'x', sortOrder: 0, isPrimary: false, archived: false },
-        { id: 'task-2', title: 'Sign contract', status: 'Inbox', priority: 'Normal', createdAt: 'x', sortOrder: 1, isPrimary: false, archived: false },
+        { id: 'task-1', title: 'Draft contract', status: 'Inbox', priority: 'Normal', createdAt: 'x', sortOrder: 0, isPrimary: false, archived: false, calendarOnly: false },
+        { id: 'task-2', title: 'Sign contract', status: 'Inbox', priority: 'Normal', createdAt: 'x', sortOrder: 1, isPrimary: false, archived: false, calendarOnly: false },
       ],
     };
     renderView();
@@ -303,8 +303,8 @@ describe('GoalDetailView — automatic progress display', () => {
       goals: [goalFixture()],
       targets: [linkedTasksTarget({ taskIds: ['a', 'b'] })],
       tasks: [
-        { id: 'a', title: 'Done task', status: 'Done', priority: 'Normal', createdAt: 'x', sortOrder: 0, isPrimary: false, archived: false },
-        { id: 'b', title: 'Open task', status: 'Inbox', priority: 'Normal', createdAt: 'x', sortOrder: 1, isPrimary: false, archived: false },
+        { id: 'a', title: 'Done task', status: 'Done', priority: 'Normal', createdAt: 'x', sortOrder: 0, isPrimary: false, archived: false, calendarOnly: false },
+        { id: 'b', title: 'Open task', status: 'Inbox', priority: 'Normal', createdAt: 'x', sortOrder: 1, isPrimary: false, archived: false, calendarOnly: false },
       ],
     };
     renderView();

@@ -212,6 +212,36 @@ describe('buildAISnapshot — current-work scope', () => {
     expect(text).not.toContain('sortOrder');
     expect(text).not.toContain('createdAt');
   });
+
+  it('excludes a calendar-only task from a project section, even when due today', () => {
+    const projects = [project({ id: 'p1', name: 'SJE' })];
+    const tasks = [
+      createTaskForTest({
+        id: 't1',
+        title: 'Dentist appointment',
+        projectId: 'p1',
+        dueDate: '2026-09-07',
+        calendarOnly: true,
+      }),
+    ];
+    const text = buildAISnapshot(projects, tasks, [], [], [], { type: 'current-work' }, GENERATED_AT);
+    expect(text).not.toContain('Dentist appointment');
+    expect(text).not.toContain('## Project: SJE');
+  });
+
+  it('excludes a calendar-only, unassigned task from the Unassigned tasks section', () => {
+    const tasks = [
+      createTaskForTest({
+        id: 't1',
+        title: 'Dentist appointment',
+        dueDate: '2026-09-07',
+        calendarOnly: true,
+      }),
+    ];
+    const text = buildAISnapshot([], tasks, [], [], [], { type: 'current-work' }, GENERATED_AT);
+    expect(text).not.toContain('Dentist appointment');
+    expect(text).not.toContain('## Unassigned tasks');
+  });
 });
 
 describe('buildAISnapshot — today scope', () => {
@@ -243,6 +273,63 @@ describe('buildAISnapshot — today scope', () => {
   it('produces a useful message when nothing is scheduled for Today', () => {
     const text = buildAISnapshot([], [], [], [], [], { type: 'today' }, GENERATED_AT);
     expect(text).toContain('No tasks are scheduled for Today.');
+  });
+
+  it('includes a calendar-only task whose due date is today, even though it has no Today status', () => {
+    const tasks = [
+      createTaskForTest({
+        id: 't1',
+        title: 'Dentist appointment',
+        status: 'Inbox',
+        dueDate: '2026-09-07',
+        calendarOnly: true,
+      }),
+    ];
+    const text = buildAISnapshot([], tasks, [], [], [], { type: 'today' }, GENERATED_AT);
+    expect(text).toContain('Dentist appointment | Project: None');
+  });
+
+  it('excludes a calendar-only task whose due date is not today', () => {
+    const tasks = [
+      createTaskForTest({
+        id: 't1',
+        title: 'Dentist appointment',
+        status: 'Inbox',
+        dueDate: '2026-09-08',
+        calendarOnly: true,
+      }),
+    ];
+    const text = buildAISnapshot([], tasks, [], [], [], { type: 'today' }, GENERATED_AT);
+    expect(text).not.toContain('Dentist appointment');
+  });
+
+  it('excludes an archived calendar-only task even when due today', () => {
+    const tasks = [
+      createTaskForTest({
+        id: 't1',
+        title: 'Archived appointment',
+        dueDate: '2026-09-07',
+        calendarOnly: true,
+        archived: true,
+      }),
+    ];
+    const text = buildAISnapshot([], tasks, [], [], [], { type: 'today' }, GENERATED_AT);
+    expect(text).not.toContain('Archived appointment');
+  });
+
+  it('lists status-Today tasks before calendar-only-today tasks, deterministically', () => {
+    const tasks = [
+      createTaskForTest({ id: 't-status', title: 'Status today task', status: 'Today', sortOrder: 5 }),
+      createTaskForTest({
+        id: 't-cal',
+        title: 'Calendar only today task',
+        dueDate: '2026-09-07',
+        calendarOnly: true,
+        sortOrder: 0,
+      }),
+    ];
+    const text = buildAISnapshot([], tasks, [], [], [], { type: 'today' }, GENERATED_AT);
+    expect(text.indexOf('Status today task')).toBeLessThan(text.indexOf('Calendar only today task'));
   });
 });
 
@@ -292,6 +379,22 @@ describe('buildAISnapshot — one-project scope', () => {
   it('produces a useful message when the project id does not match anything', () => {
     const text = buildAISnapshot([], [], [], [], [], { type: 'project', projectId: 'missing' }, GENERATED_AT);
     expect(text).toContain('No project selected.');
+  });
+
+  it('excludes a calendar-only task belonging to the selected project, even when due today', () => {
+    const projects = [project({ id: 'p1', name: 'Alpha' })];
+    const tasks = [
+      createTaskForTest({
+        id: 't1',
+        title: 'Dentist appointment',
+        projectId: 'p1',
+        dueDate: '2026-09-07',
+        calendarOnly: true,
+      }),
+    ];
+    const text = buildAISnapshot(projects, tasks, [], [], [], { type: 'project', projectId: 'p1' }, GENERATED_AT);
+    expect(text).not.toContain('Dentist appointment');
+    expect(text).toContain('No tasks in this project.');
   });
 });
 

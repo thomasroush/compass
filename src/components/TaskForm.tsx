@@ -1,8 +1,16 @@
 import { FormEvent, MouseEvent, useEffect, useState } from 'react';
 import { useApp } from '../store/useApp';
 import { downloadTaskIcs } from '../lib/ics';
-import { PRIORITIES, type Task, type TaskStatus } from '../types';
-import { StatusSelect } from './StatusSelect';
+import { PRIORITIES, TASK_STATUSES, type Task, type TaskStatus } from '../types';
+
+/**
+ * Synthetic placement value shown only in this form's own dropdown —
+ * `calendarOnly` is not a `TaskStatus` (see Task.calendarOnly's doc comment)
+ * and deliberately never reaches TaskRow's compact inline "Move to"
+ * dropdown, which keeps using the plain `StatusSelect` component unchanged.
+ */
+const CALENDAR_ONLY_PLACEMENT = 'calendar-only' as const;
+type PlacementValue = TaskStatus | typeof CALENDAR_ONLY_PLACEMENT;
 
 interface TaskFormProps {
   task?: Task;
@@ -20,10 +28,25 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
   const [title, setTitle] = useState(task?.title ?? initialTitle ?? '');
   const [notes, setNotes] = useState(task?.notes ?? '');
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'Inbox');
+  const [calendarOnly, setCalendarOnly] = useState(task?.calendarOnly ?? false);
   const [priority, setPriority] = useState(task?.priority ?? 'Normal');
   const [projectId, setProjectId] = useState(task?.projectId ?? '');
   const [dueDate, setDueDate] = useState(task?.dueDate ?? '');
   const [dueTime, setDueTime] = useState(task?.dueTime ?? '');
+  // Only set once a submit attempt actually fails the calendar-only/due-date
+  // rule — recomputed live against the current field values below, so it
+  // clears itself the moment the user fixes it, without a separate effect.
+  const [dueDateErrorAttempted, setDueDateErrorAttempted] = useState(false);
+  const showDueDateError = dueDateErrorAttempted && calendarOnly && !dueDate;
+
+  function handlePlacementChange(value: PlacementValue) {
+    if (value === CALENDAR_ONLY_PLACEMENT) {
+      setCalendarOnly(true);
+    } else {
+      setCalendarOnly(false);
+      setStatus(value);
+    }
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -40,16 +63,28 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
     const trimmed = title.trim();
     if (!trimmed) return;
 
+    if (calendarOnly && !dueDate) {
+      setDueDateErrorAttempted(true);
+      return;
+    }
+
+    // Calendar only is a placement/visibility flag, not a workflow status —
+    // it always stores 'Inbox' as its underlying status (see
+    // Task.calendarOnly's doc comment); any real status is exactly what the
+    // dropdown last selected.
+    const finalStatus: TaskStatus = calendarOnly ? 'Inbox' : status;
+
     if (isNew) {
       dispatch({
         type: 'ADD_TASK',
         title: trimmed,
-        status,
+        status: finalStatus,
         notes: notes.trim() || undefined,
         priority,
         projectId: projectId || undefined,
         dueDate: dueDate || undefined,
         dueTime: dueDate ? dueTime || undefined : undefined,
+        calendarOnly,
       });
       onCreated?.();
     } else {
@@ -59,11 +94,12 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
         updates: {
           title: trimmed,
           notes: notes.trim() || undefined,
-          status,
+          status: finalStatus,
           priority,
           projectId: projectId || undefined,
           dueDate: dueDate || undefined,
           dueTime: dueDate ? dueTime || undefined : undefined,
+          calendarOnly,
         },
       });
     }
@@ -110,7 +146,21 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
             />
           </div>
 
-          <StatusSelect id="task-status" value={status} onChange={setStatus} />
+          <div className="field">
+            <label htmlFor="task-status">Status</label>
+            <select
+              id="task-status"
+              value={calendarOnly ? CALENDAR_ONLY_PLACEMENT : status}
+              onChange={(e) => handlePlacementChange(e.target.value as PlacementValue)}
+            >
+              {TASK_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+              <option value={CALENDAR_ONLY_PLACEMENT}>Calendar only</option>
+            </select>
+          </div>
 
           <div className="field">
             <label htmlFor="task-priority">Priority</label>
@@ -165,6 +215,12 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
               />
             </div>
           </div>
+
+          {showDueDateError && (
+            <p className="message error" role="alert">
+              Calendar only requires a due date.
+            </p>
+          )}
 
           <div className="dialog-actions">
             {!isNew && task.dueDate && (

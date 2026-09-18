@@ -123,6 +123,33 @@ describe('validateAppData — Task/Project ownerId', () => {
   });
 });
 
+describe('validateAppData — Task calendarOnly', () => {
+  it('defaults a Task with no calendarOnly key at all to false — pre-feature local data must load exactly as before', () => {
+    const result = validateAppData({ ...BASE, tasks: [validTask], projects: [] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.tasks[0].calendarOnly).toBe(false);
+  });
+
+  it('preserves an explicit calendarOnly: true', () => {
+    const result = validateAppData({
+      ...BASE,
+      tasks: [{ ...validTask, dueDate: '2026-09-20', calendarOnly: true }],
+      projects: [],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.tasks[0].calendarOnly).toBe(true);
+  });
+
+  it('rejects a non-boolean calendarOnly rather than silently coercing it', () => {
+    const result = validateAppData({
+      ...BASE,
+      tasks: [{ ...validTask, calendarOnly: 'yes' }],
+      projects: [],
+    });
+    expect(result).toEqual({ ok: false, error: 'Invalid task at index 0.' });
+  });
+});
+
 const validQuickNote = {
   id: 'n1',
   text: 'Buy underwear',

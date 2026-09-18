@@ -50,6 +50,7 @@ const task: Task = {
   sortOrder: 0,
   isPrimary: false,
   archived: false,
+  calendarOnly: false,
 };
 const note: QuickNote = {
   id: 'note-1',

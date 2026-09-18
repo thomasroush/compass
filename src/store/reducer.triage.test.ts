@@ -14,6 +14,11 @@ describe('getTriageTasks', () => {
     const highPriority = createTaskForTest({ id: 'high', priority: 'High' });
     const inProgress = createTaskForTest({ id: 'in-progress', status: 'In Progress' });
     const archived = createTaskForTest({ id: 'archived', archived: true });
+    const calendarOnly = createTaskForTest({
+      id: 'calendar-only',
+      dueDate: '2026-09-05',
+      calendarOnly: true,
+    });
 
     const result = getTriageTasks([
       inbox,
@@ -22,6 +27,7 @@ describe('getTriageTasks', () => {
       highPriority,
       inProgress,
       archived,
+      calendarOnly,
     ]);
 
     expect(result.map((t) => t.id)).toEqual(['inbox']);

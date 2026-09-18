@@ -30,6 +30,11 @@ describe('getTasksGroupedByDueDate', () => {
     expect(groups[0].tasks.map((t) => t.id)).toEqual(['first', 'second']);
   });
 
+  it('includes a calendar-only task — the Calendar is the one place it must always appear', () => {
+    const task = createTaskForTest({ id: 'cal-only', dueDate: '2026-09-05', calendarOnly: true });
+    expect(getTasksGroupedByDueDate([task])).toEqual([{ date: '2026-09-05', tasks: [task] }]);
+  });
+
   it('does not use createdAt, completedAt, or updatedAt to determine grouping', () => {
     const task = createTaskForTest({
       id: 'done-in-past',

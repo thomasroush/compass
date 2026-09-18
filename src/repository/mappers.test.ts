@@ -111,6 +111,7 @@ describe('task mapping', () => {
       sort_order: 2,
       is_primary: true,
       archived: false,
+      calendar_only: true,
       updated_at: '2026-08-30T01:00:00.000Z',
     });
     expect(cloud).toEqual({
@@ -127,6 +128,7 @@ describe('task mapping', () => {
       sortOrder: 2,
       isPrimary: true,
       archived: false,
+      calendarOnly: true,
       updatedAt: '2026-08-30T01:00:00.000Z',
     });
   });
@@ -146,6 +148,7 @@ describe('task mapping', () => {
       sort_order: 0,
       is_primary: false,
       archived: false,
+      calendar_only: false,
       updated_at: 'ts',
     });
     expect(cloud.notes).toBeUndefined();
@@ -153,6 +156,27 @@ describe('task mapping', () => {
     expect(cloud.dueDate).toBeUndefined();
     expect(cloud.dueTime).toBeUndefined();
     expect(cloud.completedAt).toBeUndefined();
+  });
+
+  it('maps calendar_only through to calendarOnly, both true and false', () => {
+    const base = {
+      id: 't1',
+      title: 'Buy milk',
+      notes: null,
+      status: 'Inbox' as const,
+      project_id: null,
+      priority: 'Normal' as const,
+      due_date: '2026-09-01',
+      due_time: null,
+      created_at: 'ts',
+      completed_at: null,
+      sort_order: 0,
+      is_primary: false,
+      archived: false,
+      updated_at: 'ts',
+    };
+    expect(taskFromRow({ ...base, calendar_only: true }).calendarOnly).toBe(true);
+    expect(taskFromRow({ ...base, calendar_only: false }).calendarOnly).toBe(false);
   });
 
   it('builds an insert row scoped to the given user id, preserving the client-generated id and createdAt', () => {
@@ -165,6 +189,7 @@ describe('task mapping', () => {
       sortOrder: 0,
       isPrimary: false,
       archived: false,
+      calendarOnly: false,
     };
     expect(taskToInsertRow('user-1', task)).toEqual({
       id: 't1',
@@ -181,7 +206,24 @@ describe('task mapping', () => {
       sort_order: 0,
       is_primary: false,
       archived: false,
+      calendar_only: false,
     });
+  });
+
+  it('carries calendarOnly: true through to the insert row', () => {
+    const task: Task = {
+      id: 't1',
+      title: 'Buy milk',
+      status: 'Inbox',
+      priority: 'Normal',
+      dueDate: '2026-09-01',
+      createdAt: '2026-08-30T00:00:00.000Z',
+      sortOrder: 0,
+      isPrimary: false,
+      archived: false,
+      calendarOnly: true,
+    };
+    expect(taskToInsertRow('user-1', task).calendar_only).toBe(true);
   });
 
   it('builds an update row containing only the fields that were provided', () => {
@@ -209,6 +251,12 @@ describe('task mapping', () => {
       due_date: '2026-09-20',
       due_time: '09:00',
     });
+  });
+
+  it('maps calendarOnly updates to calendar_only, and omits it when not provided', () => {
+    expect(taskUpdatesToRow({ calendarOnly: true })).toEqual({ calendar_only: true });
+    expect(taskUpdatesToRow({ calendarOnly: false })).toEqual({ calendar_only: false });
+    expect(taskUpdatesToRow({ status: 'Done' })).toEqual({ status: 'Done' });
   });
 });
 
@@ -578,6 +626,7 @@ describe('task mapping — with owner', () => {
       sort_order: 0,
       is_primary: false,
       archived: false,
+      calendar_only: false,
       updated_at: 'ts',
     });
     expect(cloud.ownerId).toBe('owner-1');

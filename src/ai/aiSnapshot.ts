@@ -1,6 +1,7 @@
 import {
   formatTargetValue,
   getActiveQuickNotes,
+  getActiveTasks,
   getGoalProgress,
   getGoalTargets,
   getProjectGoals,
@@ -56,6 +57,19 @@ export function formatGeneratedAt(date: Date): string {
 
 function formatDueDate(dueDate?: string): string {
   return dueDate ? `Due: ${dueDate}` : 'No due date';
+}
+
+/**
+ * "YYYY-MM-DD" for `generatedAt`, in the same local-date convention as
+ * `todayDateString()` (src/types.ts) — but derived from the snapshot's own
+ * `generatedAt` rather than a fresh `new Date()`, matching this file's
+ * existing determinism requirement (see buildAISnapshot's doc comment).
+ */
+function dateStringFromDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function formatTaskLine(task: Task, projectName?: string | null): string {
@@ -215,8 +229,11 @@ function buildCurrentWorkBody(
   }
 
   for (const project of activeProjects) {
+    // Calendar-only tasks are a Board/Tasks-list visibility flag, not
+    // workflow content — Current Work never surfaces them (see the Calendar
+    // Only feature: they belong to the Calendar, not this workflow summary).
     const projectTasks = tasks
-      .filter((t) => t.projectId === project.id && !t.archived && t.status !== 'Done')
+      .filter((t) => t.projectId === project.id && !t.archived && !t.calendarOnly && t.status !== 'Done')
       .sort((a, b) => a.sortOrder - b.sortOrder);
     if (projectTasks.length === 0) continue;
     pushProjectSection(lines, project, projectTasks);
@@ -224,7 +241,7 @@ function buildCurrentWorkBody(
   }
 
   const unassigned = tasks
-    .filter((t) => !t.projectId && !t.archived && t.status !== 'Done')
+    .filter((t) => !t.projectId && !t.archived && !t.calendarOnly && t.status !== 'Done')
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   if (unassigned.length > 0) {
@@ -243,15 +260,34 @@ function buildCurrentWorkBody(
   }
 }
 
-function buildTodayBody(lines: string[], projects: Project[], tasks: Task[], quickNotes: QuickNote[]): void {
+/**
+ * "Today" combines two independent things a user would call "today's work":
+ * tasks actually placed in the Today workflow column, plus calendar-only
+ * tasks (never part of that column — see getTasksByStatus) whose due date is
+ * today. The latter is the one deliberate exception to Calendar Only's
+ * "invisible outside the Calendar" rule — an appointment due today is still
+ * something to review today, even though it never appears on the Board.
+ */
+function buildTodayBody(
+  lines: string[],
+  projects: Project[],
+  tasks: Task[],
+  quickNotes: QuickNote[],
+  today: string,
+): void {
   pushQuickNotesSection(lines, quickNotes);
   const todayTasks = getTasksByStatus(tasks, 'Today');
+  const calendarOnlyToday = getActiveTasks(tasks)
+    .filter((t) => t.calendarOnly && t.dueDate === today)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const combined = [...todayTasks, ...calendarOnlyToday];
+
   lines.push("## Today's tasks", '');
-  if (todayTasks.length === 0) {
+  if (combined.length === 0) {
     lines.push('No tasks are scheduled for Today.', '');
     return;
   }
-  for (const task of todayTasks) {
+  for (const task of combined) {
     const project = task.projectId ? projects.find((p) => p.id === task.projectId) : undefined;
     lines.push(formatTaskLine(task, project?.name ?? null));
   }
@@ -275,7 +311,10 @@ function buildProjectBody(
     lines.push('No project selected.', '');
     return;
   }
-  const projectTasks = getProjectTasks(tasks, project.id);
+  // getProjectTasks is shared with ProjectsView's own project task list,
+  // which is unaffected by Calendar Only — the exclusion is applied locally
+  // here, not inside that shared selector.
+  const projectTasks = getProjectTasks(tasks, project.id).filter((t) => !t.calendarOnly);
   pushProjectSection(lines, project, projectTasks);
 
   // Already inside this project's own section, so the "Linked projects:"
@@ -317,7 +356,7 @@ export function buildAISnapshot(
   ];
 
   if (scope.type === 'today') {
-    buildTodayBody(lines, projects, tasks, quickNotes);
+    buildTodayBody(lines, projects, tasks, quickNotes, dateStringFromDate(generatedAt));
   } else if (scope.type === 'project') {
     buildProjectBody(lines, projects, tasks, goals, targets, scope.projectId);
   } else {
