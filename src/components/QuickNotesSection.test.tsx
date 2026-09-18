@@ -18,6 +18,9 @@ vi.mock('../store/useApp', () => ({
   useApp: () => ({ state: mocks.appState.current, dispatch: mocks.appState.dispatch }),
 }));
 
+// TaskForm (opened by Convert to Task) reads the signed-in user for Notes headers.
+vi.mock('../store/useAuth', () => ({ useAuth: () => ({ user: null }) }));
+
 vi.mock('../store/useCloudSync', () => ({
   useCloudSync: () => ({ quickNotesError: mocks.cloudSyncState.quickNotesError }),
 }));

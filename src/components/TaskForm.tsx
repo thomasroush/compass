@@ -1,6 +1,13 @@
-import { FormEvent, MouseEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, MouseEvent, useEffect, useRef, useState } from 'react';
 import { useApp } from '../store/useApp';
+import { useAuth } from '../store/useAuth';
 import { downloadTaskIcs } from '../lib/ics';
+import {
+  addNoteHeader,
+  formatNoteHeader,
+  noteAuthorName,
+  removeEmptyNoteHeader,
+} from '../lib/noteHeader';
 import { PRIORITIES, TASK_STATUSES, type Task, type TaskStatus } from '../types';
 
 /**
@@ -23,7 +30,10 @@ interface TaskFormProps {
 
 export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormProps) {
   const { state, dispatch } = useApp();
+  const { user } = useAuth();
   const isNew = !task;
+  // The header added to Notes in this editing session, if any — at most one.
+  const noteHeaderRef = useRef<string | null>(null);
 
   const [title, setTitle] = useState(task?.title ?? initialTitle ?? '');
   const [notes, setNotes] = useState(task?.notes ?? '');
@@ -58,6 +68,25 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
 
   const activeProjects = state.projects.filter((p) => p.status === 'active');
 
+  // The first time new text is actually typed into Notes, append the writer's
+  // "Name — time date" header at the bottom and put that text underneath it.
+  // Focusing the field, or only deleting/replacing existing text, adds nothing.
+  // Skipped when nobody is signed in (local-only mode has no identity to show).
+  function handleNotesChange(e: ChangeEvent<HTMLTextAreaElement>) {
+    const next = e.target.value;
+    const author = noteAuthorName(user?.email);
+    if (!noteHeaderRef.current && author) {
+      const header = formatNoteHeader(author);
+      const withHeader = addNoteHeader(notes, next, header);
+      if (withHeader !== null) {
+        noteHeaderRef.current = header;
+        setNotes(withHeader);
+        return;
+      }
+    }
+    setNotes(next);
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = title.trim();
@@ -74,12 +103,17 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
     // dropdown last selected.
     const finalStatus: TaskStatus = calendarOnly ? 'Inbox' : status;
 
+    // Never save a header the user typed under and then erased.
+    const finalNotes = noteHeaderRef.current
+      ? removeEmptyNoteHeader(notes, noteHeaderRef.current)
+      : notes;
+
     if (isNew) {
       dispatch({
         type: 'ADD_TASK',
         title: trimmed,
         status: finalStatus,
-        notes: notes.trim() || undefined,
+        notes: finalNotes.trim() || undefined,
         priority,
         projectId: projectId || undefined,
         dueDate: dueDate || undefined,
@@ -93,7 +127,7 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
         id: task.id,
         updates: {
           title: trimmed,
-          notes: notes.trim() || undefined,
+          notes: finalNotes.trim() || undefined,
           status: finalStatus,
           priority,
           projectId: projectId || undefined,
@@ -142,7 +176,7 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
               id="task-notes"
               rows={3}
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={handleNotesChange}
             />
           </div>
 
