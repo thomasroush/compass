@@ -11,9 +11,12 @@ interface TaskRowProps {
   showPostpone?: boolean;
   showReorder?: boolean;
   compact?: boolean;
-  /** When true, renders only the Complete/Reopen and Edit actions, hiding
-   * primary toggle, postpone, reorder, status select, and archive. Used by
-   * the Calendar view to keep rows scannable; other views are unaffected. */
+  /** When true, renders only one-click Archive and Edit actions, hiding
+   * Complete/Reopen, primary toggle, postpone, reorder, and status select.
+   * Used by the Calendar view to keep rows scannable and let a passed or
+   * irrelevant item be cleared in one click; other views are unaffected.
+   * Archiving uses the same ARCHIVE_TASK as every other view and is separate
+   * from completion — status and `completedAt` are left untouched. */
   minimalActions?: boolean;
   /** When true, shows the task's due time (if set) instead of the
    * "Due {date}" text — used by the Calendar view, which already groups
@@ -49,6 +52,16 @@ export function TaskRow({
     dispatch({ type: 'UPDATE_TASK', id: task.id, updates: { status } });
   }
 
+  const archiveButton = (
+    <button
+      type="button"
+      className="secondary"
+      onClick={() => dispatch({ type: 'ARCHIVE_TASK', id: task.id })}
+    >
+      Archive
+    </button>
+  );
+
   return (
     <>
       <article className={`task-row ${compact ? 'compact' : ''}`}>
@@ -81,13 +94,13 @@ export function TaskRow({
             </button>
           )}
 
-          {task.status !== 'Done' && (
+          {!minimalActions && task.status !== 'Done' && (
             <button type="button" onClick={() => dispatch({ type: 'COMPLETE_TASK', id: task.id })}>
               Complete
             </button>
           )}
 
-          {task.status === 'Done' && (
+          {!minimalActions && task.status === 'Done' && (
             <button
               type="button"
               className="secondary"
@@ -96,6 +109,8 @@ export function TaskRow({
               Reopen
             </button>
           )}
+
+          {minimalActions && archiveButton}
 
           <button type="button" className="secondary" onClick={() => setEditing(true)}>
             Edit
@@ -150,15 +165,7 @@ export function TaskRow({
             />
           )}
 
-          {!minimalActions && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => dispatch({ type: 'ARCHIVE_TASK', id: task.id })}
-            >
-              Archive
-            </button>
-          )}
+          {!minimalActions && archiveButton}
         </div>
       </article>
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { CalendarView } from './CalendarView';
 import { createEmptyAppData, type AppData } from '../types';
 import { createTaskForTest as makeTask } from '../store/reducer';
@@ -73,16 +73,50 @@ describe('CalendarView', () => {
     expect(screen.getByText('Overdue')).toBeTruthy();
   });
 
-  it('shows only Complete and Edit actions on each task row', () => {
+  it('shows only Archive and Edit actions on each task row', () => {
     mocks.appState.current = {
       ...createEmptyAppData(),
       tasks: [makeTask({ id: 'dated', title: 'Dated task', dueDate: '2026-09-05' })],
     };
     render(<CalendarView />);
-    expect(screen.getByRole('button', { name: 'Complete' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull();
+    const labels = screen.getAllByRole('button').map((b) => b.textContent);
+    expect(labels).toEqual(['Archive', 'Edit']);
+    expect(screen.queryByRole('button', { name: 'Complete' })).toBeNull();
     expect(screen.queryByLabelText('Move to')).toBeNull();
+  });
+
+  it('archives immediately on one click — no dialog, and never completes the task', () => {
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      tasks: [makeTask({ id: 'dated', title: 'Dated task', dueDate: '2026-09-05' })],
+    };
+    render(<CalendarView />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+
+    expect(mocks.appState.dispatch).toHaveBeenCalledTimes(1);
+    expect(mocks.appState.dispatch).toHaveBeenCalledWith({ type: 'ARCHIVE_TASK', id: 'dated' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Confirm' })).toBeNull();
+  });
+
+  it('offers Archive (not Complete or Reopen) on a completed task, a calendar-only item, and a project task', () => {
+    mocks.appState.current = {
+      ...createEmptyAppData(),
+      tasks: [
+        makeTask({ id: 'done', title: 'Done task', dueDate: '2026-09-05', status: 'Done' }),
+        makeTask({ id: 'cal', title: 'Calendar item', dueDate: '2026-09-06', calendarOnly: true }),
+        makeTask({ id: 'proj', title: 'Project task', dueDate: '2026-09-07', projectId: 'p1' }),
+      ],
+    };
+    render(<CalendarView />);
+
+    expect(screen.getAllByRole('button', { name: 'Archive' })).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: 'Complete' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reopen' })).toBeNull();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Archive' })[1]);
+    expect(mocks.appState.dispatch).toHaveBeenCalledWith({ type: 'ARCHIVE_TASK', id: 'cal' });
   });
 
   it('excludes archived dated tasks', () => {
