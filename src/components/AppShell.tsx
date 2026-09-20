@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { CloudSyncBanner } from './CloudSyncBanner';
 import { CopyToAIDialog } from './CopyToAIDialog';
+import { MobileNav } from './MobileNav';
 import { PasswordRecoveryDialog } from './PasswordRecoveryDialog';
 import { QuickAddTask } from './QuickAddTask';
 import { QuickNoteDialog } from './QuickNoteDialog';
@@ -60,17 +61,7 @@ export function AppShell() {
           <Outlet />
         </main>
 
-        <nav className="mobile-nav" aria-label="Mobile navigation">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              className={location.pathname === item.to ? 'mobile-nav-link active' : 'mobile-nav-link'}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <MobileNav />
       </div>
 
       <PasswordRecoveryDialog />

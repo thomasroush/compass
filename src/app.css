@@ -1084,6 +1084,11 @@ code {
     min-height: 48px;
   }
 
+  .main-content {
+    /* Clear the fixed bottom nav (about 4.5rem tall) plus the device's bottom inset. */
+    padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
+  }
+
   .mobile-nav {
     display: flex;
     gap: 0.25rem;
@@ -1091,39 +1096,99 @@ code {
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 0.35rem 0.4rem;
+    padding: 0.35rem 0.4rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
     background: var(--surface);
     border-top: 1px solid var(--border);
-    overflow-x: auto;
     z-index: 50;
   }
 
-  .mobile-nav-link {
+  /* Shared by the four <a> destinations and the More <button>. The button
+     needs the extra selectors below to out-rank the global button styles. */
+  .mobile-nav .mobile-nav-link {
     flex: 1;
-    min-width: 4.5rem;
+    min-width: 0;
     min-height: 48px;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    text-align: center;
-    padding: 0.5rem 0.35rem;
+    gap: 0.15rem;
+    padding: 0.35rem 0.25rem;
+    border: 0;
     border-radius: var(--radius-nav);
-    font-size: 0.7rem;
+    background: transparent;
+    box-shadow: none;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.2;
+    text-align: center;
     text-decoration: none;
     color: var(--muted);
     white-space: nowrap;
     transition: background-color 0.15s ease, color 0.15s ease;
   }
 
-  .mobile-nav-link:hover {
-    background: var(--bg);
-    color: var(--text);
+  .mobile-nav .mobile-nav-icon {
+    flex-shrink: 0;
   }
 
-  .mobile-nav-link.active {
+  .mobile-nav a.mobile-nav-link:hover,
+  .mobile-nav button.mobile-nav-link:not(:disabled):hover,
+  .mobile-nav button.mobile-nav-link:not(:disabled):active {
+    background: var(--bg);
+    color: var(--text);
+    box-shadow: none;
+  }
+
+  .mobile-nav .mobile-nav-link.active,
+  .mobile-nav a.mobile-nav-link.active:hover,
+  .mobile-nav button.mobile-nav-link.active:not(:disabled):hover,
+  .mobile-nav button.mobile-nav-link.active:not(:disabled):active {
     color: var(--accent);
     font-weight: 600;
     background: var(--accent-soft);
+  }
+
+  .mobile-more {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+  }
+
+  .mobile-more-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.5rem);
+    min-width: 10rem;
+    margin: 0;
+    padding: 0.35rem;
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(28, 25, 23, 0.14);
+  }
+
+  .mobile-more-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0.5rem 0.85rem;
+    border-radius: var(--radius-nav);
+    text-decoration: none;
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .mobile-more-link:hover {
+    background: var(--bg);
+  }
+
+  .mobile-more-link.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
   }
 
   .board-row {
