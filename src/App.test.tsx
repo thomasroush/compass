@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import App from './App';
 
 /**
@@ -36,6 +36,8 @@ vi.mock('./lib/supabaseClient', () => ({ supabase: null, isSupabaseConfigured: f
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  // BrowserRouter reads the real jsdom URL, so a test that navigates must not leak its route.
+  window.history.pushState({}, '', '/');
   vi.clearAllMocks();
   authState.isSupabaseConfigured = true;
   authState.status = 'ready';
@@ -93,6 +95,40 @@ describe('AuthGate — signed in (Supabase configured)', () => {
     expect(screen.getAllByRole('link', { name: 'Today' }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: 'Settings' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+  });
+
+  it('shows an icon beside every desktop sidebar label, in the existing order, with the active section marked', () => {
+    authState.status = 'ready';
+    authState.user = { id: 'user-1', email: 'person@example.com' };
+    cloudSyncState.status = 'idle';
+    render(<App />);
+
+    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' });
+    const links = within(sidebar).getAllByRole('link');
+
+    expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['Today', '/'],
+      ['Board', '/board'],
+      ['Tasks', '/tasks'],
+      ['Projects', '/projects'],
+      ['Goals', '/goals'],
+      ['Calendar', '/calendar'],
+      ['About', '/about'],
+      ['Settings', '/settings'],
+    ]);
+    for (const link of links) {
+      const icon = link.querySelector('svg');
+      expect(icon).not.toBeNull();
+      expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    }
+
+    // Today is the active section on first load; its icon lives inside the active link.
+    expect(within(sidebar).getByRole('link', { name: 'Today' }).className).toContain('active');
+    fireEvent.click(within(sidebar).getByRole('link', { name: 'Calendar' }));
+    const calendar = within(sidebar).getByRole('link', { name: 'Calendar' });
+    expect(calendar.className).toContain('active');
+    expect(calendar.querySelector('svg')).not.toBeNull();
+    expect(within(sidebar).getByRole('link', { name: 'Today' }).className).not.toContain('active');
   });
 
   it('blocks the app behind LinkingChoice while an explicit account-link choice is pending', () => {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { BoardIcon, CalendarIcon, MoreIcon, ProjectsIcon, TasksIcon } from './navIcons';
 
 interface NavDestination {
   to: string;
@@ -113,75 +114,5 @@ export function MobileNav() {
         )}
       </div>
     </nav>
-  );
-}
-
-function Icon({ children }: { children: ReactNode }) {
-  return (
-    <svg
-      className="mobile-nav-icon"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      {children}
-    </svg>
-  );
-}
-
-function BoardIcon() {
-  return (
-    <Icon>
-      <rect x="3.5" y="4" width="4.5" height="16" rx="1" />
-      <rect x="9.75" y="4" width="4.5" height="10" rx="1" />
-      <rect x="16" y="4" width="4.5" height="13" rx="1" />
-    </Icon>
-  );
-}
-
-function TasksIcon() {
-  return (
-    <Icon>
-      <path d="M4 7l1.5 1.5L8 6" />
-      <path d="M4 15.5L5.5 17 8 14.5" />
-      <path d="M12 7.25h8" />
-      <path d="M12 15.75h8" />
-    </Icon>
-  );
-}
-
-function CalendarIcon() {
-  return (
-    <Icon>
-      <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
-      <path d="M3.5 10h17" />
-      <path d="M8 3v4" />
-      <path d="M16 3v4" />
-    </Icon>
-  );
-}
-
-function ProjectsIcon() {
-  return (
-    <Icon>
-      <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2.25H19A1.5 1.5 0 0 1 20.5 9.75V17.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" />
-    </Icon>
-  );
-}
-
-function MoreIcon() {
-  return (
-    <Icon>
-      <circle cx="5.5" cy="12" r="1.25" fill="currentColor" />
-      <circle cx="12" cy="12" r="1.25" fill="currentColor" />
-      <circle cx="18.5" cy="12" r="1.25" fill="currentColor" />
-    </Icon>
   );
 }

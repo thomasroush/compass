@@ -3,19 +3,29 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { CloudSyncBanner } from './CloudSyncBanner';
 import { CopyToAIDialog } from './CopyToAIDialog';
 import { MobileNav } from './MobileNav';
+import {
+  AboutIcon,
+  BoardIcon,
+  CalendarIcon,
+  GoalsIcon,
+  ProjectsIcon,
+  SettingsIcon,
+  TasksIcon,
+  TodayIcon,
+} from './navIcons';
 import { PasswordRecoveryDialog } from './PasswordRecoveryDialog';
 import { QuickAddTask } from './QuickAddTask';
 import { QuickNoteDialog } from './QuickNoteDialog';
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Today' },
-  { to: '/board', label: 'Board' },
-  { to: '/tasks', label: 'Tasks' },
-  { to: '/projects', label: 'Projects' },
-  { to: '/goals', label: 'Goals' },
-  { to: '/calendar', label: 'Calendar' },
-  { to: '/about', label: 'About' },
-  { to: '/settings', label: 'Settings' },
+  { to: '/', label: 'Today', icon: <TodayIcon /> },
+  { to: '/board', label: 'Board', icon: <BoardIcon /> },
+  { to: '/tasks', label: 'Tasks', icon: <TasksIcon /> },
+  { to: '/projects', label: 'Projects', icon: <ProjectsIcon /> },
+  { to: '/goals', label: 'Goals', icon: <GoalsIcon /> },
+  { to: '/calendar', label: 'Calendar', icon: <CalendarIcon /> },
+  { to: '/about', label: 'About', icon: <AboutIcon /> },
+  { to: '/settings', label: 'Settings', icon: <SettingsIcon /> },
 ];
 
 export function AppShell() {
@@ -36,6 +46,7 @@ export function AppShell() {
               to={item.to}
               className={location.pathname === item.to ? 'nav-link active' : 'nav-link'}
             >
+              {item.icon}
               {item.label}
             </Link>
           ))}
