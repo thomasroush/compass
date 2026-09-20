@@ -3,134 +3,60 @@ export function AboutView() {
     <div className="view">
       <header className="view-header">
         <h1>About Daily Compass</h1>
-        <p className="subtitle">
-          Daily Compass helps you decide where you are going, capture what is on your mind,
-          organize the work and focus on what matters today.
-        </p>
       </header>
 
       <section className="section">
-        <h2>How it works</h2>
         <p>
-          <strong>Goals define the outcome.</strong>
-          <br />
-          What do you want to accomplish?
+          I created Compass to help me keep track of my day, my responsibilities, my goals, and
+          my life. I wanted to get all the scattered lists out of my life and get more done.
         </p>
         <p>
-          <strong>Targets measure progress.</strong>
-          <br />
-          How will you know the Goal is advancing?
+          The app was built around two simple ideas: &ldquo;What gets measured gets done&rdquo;
+          and &ldquo;Write it down so you don&rsquo;t forget it.&rdquo; Compass has helped me
+          tremendously, and I&rsquo;m making it available here for free.
         </p>
         <p>
-          <strong>Projects organize the work.</strong>
-          <br />
-          What body of work will help you reach the Goal?
+          If you just want to create a simple to-do list, use Quick Notes and check off each item
+          as you complete it.
         </p>
         <p>
-          <strong>Tasks are the actions.</strong>
-          <br />
-          What specifically needs to be done?
+          When you create a task, you can assign it to different stages of completion. Your tasks
+          are then displayed from left to right on a modified Kanban board.
         </p>
         <p>
-          <strong>Quick Notes capture thoughts.</strong>
-          <br />
-          What do you want to remember without stopping to organize it?
-        </p>
-        <p>For example:</p>
-        <ul>
-          <li><strong>Goal:</strong> Achieve excellent health and fitness</li>
-          <li><strong>Target:</strong> Reach 165 pounds</li>
-          <li><strong>Project:</strong> Perfect Body</li>
-          <li><strong>Task:</strong> Attend a boxing class</li>
-          <li><strong>Quick Note:</strong> Look into boxing gyms near Katy</li>
-        </ul>
-      </section>
-
-      <section className="section">
-        <h2>The Compass sections</h2>
-        <p>
-          <strong>Today</strong>
-          <br />
-          The Tasks you intend to focus on today.
+          Want to go deeper? Create a Project to organize all the tasks needed to complete a
+          larger undertaking.
         </p>
         <p>
-          <strong>Quick Notes</strong>
-          <br />
-          Capture ideas, reminders and information quickly. A Quick Note does not need to be
-          organized or turned into a Task immediately.
+          You can also group Projects under broader Goals and assign targets or measurements to
+          those Goals. This allows you to establish milestones and track your progress toward
+          getting your business&mdash;or your life&mdash;handled.
         </p>
         <p>
-          <strong>Tasks</strong>
-          <br />
-          See new, unassigned and individual actions that still need to be organized.
+          If you want to create a quick calendar item, enter a task and select &ldquo;Calendar
+          only.&rdquo; I put everything in Compass so I can easily scan the days and weeks ahead.
+          If I see something regularly, I&rsquo;m less likely to be surprised by it.
+        </p>
+        <p>Compass also has two features that reach beyond the app.</p>
+        <p>
+          &ldquo;Copy to AI&rdquo; lets you copy selected Projects, Tasks, Goals, or current work
+          to your clipboard and paste them into an AI assistant. My AI knows me well and can
+          review how I&rsquo;m organizing my tasks, timelines, and priorities. It can suggest
+          improvements and point out where my stated Goals may not align with what I&rsquo;m
+          actually trying to get done.
         </p>
         <p>
-          <strong>Board</strong>
-          <br />
-          Move Tasks through Inbox, This Week, Today, In Progress, Waiting and Done.
+          You can also create a calendar item and export it as an <code>.ics</code> file, which
+          can then be imported into Google Calendar, Outlook, or another compatible calendar.
         </p>
         <p>
-          <strong>Projects</strong>
-          <br />
-          Keep related Tasks together. A Project can be linked to one or more Goals.
+          The Compass workflow may not be completely intuitive at first, but you can figure it
+          out. Explore the dropdown menus, and you&rsquo;ll find what you need.
         </p>
         <p>
-          <strong>Goals</strong>
-          <br />
-          Define important outcomes and track progress through numeric, yes/no or linked-task
-          Targets.
-        </p>
-        <p>
-          <strong>Calendar</strong>
-          <br />
-          See Tasks according to their due dates.
-        </p>
-        <p>
-          <strong>Daily Compass</strong>
-          <br />
-          Think through priorities, record reflections and decide what deserves your attention.
-        </p>
-      </section>
-
-      <section className="section">
-        <h2>Copy to AI</h2>
-        <p>
-          Copy to AI creates a clear summary that you can paste into ChatGPT or another AI
-          assistant.
-        </p>
-        <p>You can copy:</p>
-        <ul>
-          <li>Today&rsquo;s Tasks</li>
-          <li>One Project and its linked Goals</li>
-          <li>All current work, Goals and Targets</li>
-        </ul>
-        <p>
-          The AI can then help identify priorities, conflicts, overdue work and useful next
-          actions. Nothing is sent automatically&mdash;you decide what to copy and where to
-          paste it.
-        </p>
-      </section>
-
-      <section className="section">
-        <h2>A simple way to begin</h2>
-        <ol>
-          <li>Use Quick Notes to capture thoughts before you forget them.</li>
-          <li>Create a Project for an important area of work.</li>
-          <li>Add the Tasks you already know need to be done.</li>
-          <li>Create a Goal when you can clearly describe the larger outcome.</li>
-          <li>Add Targets when you know how progress should be measured.</li>
-          <li>Move the most important Tasks into This Week and Today.</li>
-          <li>Review your Compass regularly and adjust course when necessary.</li>
-        </ol>
-        <p>
-          You do not need to fill in everything at once. Capture what is on your mind, begin
-          with the work in front of you and add structure as it becomes useful.
-        </p>
-        <p>
-          <strong>
-            Goals provide direction. Targets show progress. Projects organize the work. Tasks
-            move it forward. Quick Notes capture everything else.
-          </strong>
+          Enjoy! I hope Compass helps you become more organized and productive. Please feel free
+          to send feedback to{' '}
+          <a href="mailto:thomasroush@gmail.com">thomasroush@gmail.com</a>.
         </p>
       </section>
     </div>
