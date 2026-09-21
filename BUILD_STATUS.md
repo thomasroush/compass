@@ -902,6 +902,13 @@ migration's scope or status.
   Storage keys, `package.json` name, backup/Markdown file names, and the `.ics` identifiers are
   unchanged. There is no web app manifest or service worker, so no PWA icons were added.
   The obsolete `public/compass_logo.jpg` was removed.
+- **GSD social preview (2026-09-21).** `public/gsd-social-preview.png` (1733x907) is referenced by
+  Open Graph and X/Twitter (`summary_large_image`) tags in `index.html`, with title "GSD — Get Shit
+  Done", the shared description, canonical/`og:url` `https://getshitdone.win/`, and image
+  `https://getshitdone.win/gsd-social-preview.png`. No social metadata existed before, so nothing
+  was replaced. Verified: `tsc -b` and `npm run build` pass, the image is copied into `dist/`
+  unchanged, and `dist/index.html` has no duplicate tags. Not verified against live crawlers;
+  platforms cache previews, so use their card validators after deploy.
 - **Calendar view (commit `d55eec7`) — chronological, not read-only.** A new `/calendar` route
   (`src/views/CalendarView.tsx`) lists all tasks with a due date, grouped and headed by date
   (overdue dates flagged), reusing `getTasksGroupedByDueDate` (`src/store/reducer.ts`) and the same
