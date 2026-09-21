@@ -17,12 +17,12 @@ export type CopyToAIScope =
   | { type: 'today' }
   | { type: 'project'; projectId: string };
 
-const SNAPSHOT_TITLE = '# Daily Compass Snapshot';
+const SNAPSHOT_TITLE = '# GSD Snapshot';
 
 const AI_INSTRUCTIONS =
   'Review this workload. Identify priority conflicts, overdue work, vague tasks, missing ' +
   'next actions, and the three most important things I should do next. Do not assume you ' +
-  'can change Compass. Present proposed changes for my review.';
+  'can change GSD. Present proposed changes for my review.';
 
 const MONTH_NAMES = [
   'January',

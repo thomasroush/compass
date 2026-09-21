@@ -116,7 +116,7 @@ describe('CopyToAIDialog', () => {
   it('shows the privacy statement from the plan', () => {
     render(<CopyToAIDialog onClose={vi.fn()} />);
     expect(
-      screen.getByText('Only the text shown here is copied. Compass does not send it anywhere.'),
+      screen.getByText('Only the text shown here is copied. GSD does not send it anywhere.'),
     ).toBeTruthy();
   });
 

@@ -216,7 +216,7 @@ a:focus-visible {
 
 .brand-logo {
   display: block;
-  height: 2rem;
+  height: 3rem;
   width: auto;
   max-width: 100%;
 }
@@ -1096,10 +1096,13 @@ code {
     display: block;
     font-weight: 600;
     white-space: nowrap;
+    /* Keeps the top bar row at its previous 48px height: 2.25rem logo + 0.75rem
+       margin equals the old 1.5rem logo + 1.5rem margin from .brand. */
+    margin-bottom: 0.75rem;
   }
 
   .mobile-brand .brand-logo {
-    height: 1.5rem;
+    height: 2.25rem;
   }
 
   .top-bar {
@@ -1310,4 +1313,8 @@ code {
 .auth-gate-panel .brand {
   text-align: center;
   margin-bottom: 1.5rem;
+}
+
+.auth-gate-panel .brand-logo {
+  margin: 0 auto;
 }

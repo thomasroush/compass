@@ -12,7 +12,9 @@ export function LoginScreen() {
   return (
     <div className="auth-gate">
       <div className="auth-gate-panel">
-        <div className="brand">Daily Compass</div>
+        <div className="brand">
+          <img src="/gsd-logo-128.png" alt="GSD" className="brand-logo" />
+        </div>
         <AccountPanel />
       </div>
     </div>

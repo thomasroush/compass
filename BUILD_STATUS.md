@@ -891,6 +891,17 @@ migration's scope or status.
 - **Daily Compass logo (commit `0f47cfa`).** `public/compass_logo.jpg` added and rendered in
   `AppShell.tsx`'s sidebar brand block and mobile top bar (`<img src="/compass_logo.jpg" alt="Daily
   Compass" className="brand-logo" />`), replacing the earlier text-only brand mark.
+- **GSD logo replaces the Daily Compass logo (2026-09-21).** `public/gsd-logo.png` is
+  the source; generated from it are `gsd-logo-128.png` (header/login/loading, aspect ratio
+  preserved; displayed at 3rem on desktop, login and loading, and 2.25rem in the mobile top bar,
+  50% larger than the original 2rem/1.5rem, with the mobile top bar's row height unchanged), `gsd-favicon-16.png`/`gsd-favicon-32.png`, and
+  `gsd-apple-touch-icon-180.png`. `index.html` gained favicon and apple-touch-icon links (none
+  existed before) and its title is now "GSD". `AppShell.tsx`, `LoginScreen.tsx`, and
+  `LoadingScreen.tsx` render the new logo. Visible brand text changed from "Daily Compass"/"Compass"
+  to "GSD" in About, the account panel, two dialogs, and the AI snapshot and Markdown export titles.
+  Storage keys, `package.json` name, backup/Markdown file names, and the `.ics` identifiers are
+  unchanged. There is no web app manifest or service worker, so no PWA icons were added.
+  The obsolete `public/compass_logo.jpg` was removed.
 - **Calendar view (commit `d55eec7`) — chronological, not read-only.** A new `/calendar` route
   (`src/views/CalendarView.tsx`) lists all tasks with a due date, grouped and headed by date
   (overdue dates flagged), reusing `getTasksGroupedByDueDate` (`src/store/reducer.ts`) and the same
@@ -1095,12 +1106,88 @@ in `src/store/reducer.ts`), consistent with every other aggregate in this app.
   (`goals: [], targets: []`) across every existing test that builds a literal `AppData`/`CloudBundle`
   object, now that both are required, non-optional shapes.
 
+**Note:** several undocumented features shipped between this entry and the next
+(`20260913120000_add_task_due_time.sql`, the Quick Notes replacement for Daily Notes, shared-project
+membership/invitations, and related styling refinements — see `git log` for the authoritative record).
+They predate the Calendar Only work below and are not retroactively documented here.
+
+### Calendar Only — task visibility/placement flag, independent of workflow status (2026-09-17)
+
+A new `calendarOnly` flag on `Task` (`src/types.ts`) lets a task be placed on the Calendar only —
+scheduled events, appointments, reminders — without cluttering the Board or Tasks/Inbox list.
+Deliberately **not** a `TaskStatus` value and not modeled as a workflow state: a calendar-only task
+keeps whatever `status` it already has (irrelevant while hidden, and exactly what lets Complete/Reopen
+from the Calendar keep working unchanged), and `calendarOnly` is the sole thing every filter checks.
+
+- **Reducer** (`src/store/reducer.ts`): `getTasksByStatus` (Board columns), `getTriageTasks` (Tasks/
+  Inbox list), and `getTodayPrimaryTasks`/`getTodayOtherTasks`/`getOverdueTasks` (Today dashboard) all
+  now exclude calendar-only tasks — one shared choke point (`getTasksByStatus`) also covers
+  `REORDER_TASK`'s column lookup and `actionProvenance.ts`'s matching dirty-target resolution for free.
+  `getActiveTasks`/`getTasksGroupedByDueDate` (the Calendar view's own selector) are deliberately
+  **untouched** — that's the one place a calendar-only task must keep appearing. `ADD_TASK`/
+  `UPDATE_TASK` defensively coerce `calendarOnly` back to `false` whenever the resulting task would have
+  no `dueDate` — a calendar-only task with no due date would be invisible everywhere at once (hidden
+  from Board/Tasks by the flag, absent from the Calendar's own due-date grouping), so the reducer never
+  allows that state to exist even if some future caller bypasses the form's own validation.
+- **Database**: `supabase/migrations/20260917130000_add_task_calendar_only.sql` —
+  `alter table public.tasks add column calendar_only boolean not null default false` plus a column
+  comment; no RLS, trigger, index, constraint, or other-table change (existing owner/member policies
+  and the shared `updated_at` trigger already cover the new column since they operate on the whole
+  row). **Applied to the live production Supabase project (2026-09-17)** — confirmed directly against
+  the remote schema: `calendar_only` is `boolean`, `not null`, `default false`; all 127 existing task
+  rows read back `calendar_only = false`, none `true` or `null`.
+- **Repository/storage**: `src/repository/mappers.ts` (`calendar_only` ↔ `calendarOnly` on
+  `taskFromRow`/`taskToInsertRow`/`taskUpdatesToRow`), `src/repository/tasksRepository.ts`'s
+  `TASK_COLUMNS`/`TASK_COLUMNS_WITH_OWNER` explicit select lists, and `src/storage/validation.ts`'s
+  `validateTask` (missing or invalid `calendarOnly` in a pre-feature `localStorage` payload defaults to
+  `false`; an explicit non-boolean value rejects the record, matching every other required field's
+  strictness). No change needed in `hydrateFromCloud.ts`/`drainSync.ts`/`refreshFromCloud.ts` — they
+  already pass whole `Task`/`CloudTask` objects through the mapper layer rather than enumerating
+  individual fields — nor in `deriveTaskOwnerId`/`resolveTaskOwnerId`, which derive `ownerId` purely
+  from `projectId`, so a calendar-only task in a shared project is owned and synced exactly like any
+  other task in that project.
+- **UI**: `src/components/TaskForm.tsx`'s placement dropdown gained a "Calendar only" option
+  (deliberately **not** added to `TaskRow`'s compact inline "Move to" `StatusSelect`, which has no
+  due-date field to validate against and is left unchanged). Selecting it requires a due date — time
+  stays optional — and submitting without one shows an inline `message error` (`role="alert"`) rather
+  than silently falling back to an ordinary task. Selecting it stores `calendarOnly: true` with
+  `status: 'Inbox'` as the underlying (irrelevant-while-hidden) status; selecting any real status sets
+  `calendarOnly: false` and applies that status, which is how a calendar-only task moves back onto the
+  Board. Editing an existing calendar-only task shows "Calendar only" selected in the dropdown.
+- **Copy to AI** (`src/ai/aiSnapshot.ts`): Today scope now unions status-`Today` tasks with
+  calendar-only tasks whose `dueDate` equals the snapshot's own `generatedAt` date (derived via a new
+  `dateStringFromDate` helper, not a fresh `new Date()`, preserving the formatter's existing
+  determinism requirement) — the one deliberate exception to "invisible outside the Calendar." Current
+  Work and One Project scopes both exclude calendar-only tasks (filtered locally in `aiSnapshot.ts`,
+  not inside the shared `getProjectTasks` selector, so `ProjectsView`'s own per-project task list is
+  unaffected).
+- Tests: new `src/store/reducer.calendarOnly.test.ts` (Board/Tasks/Today exclusion, the due-date
+  coercion guard on both `ADD_TASK` and `UPDATE_TASK`, Complete/Reopen preserving `calendarOnly: true`,
+  and moving back to the Board) and new `src/components/TaskForm.test.tsx` (blocked submit with no due
+  date, successful submit with one, "Calendar only" shown selected on edit, selecting a real status
+  clearing the flag). Extended `reducer.calendar.test.ts` (regression guard: the Calendar still shows a
+  calendar-only task), `reducer.triage.test.ts`, `mappers.test.ts`, `validation.test.ts`, and
+  `aiSnapshot.test.ts` (Today inclusion/exclusion by date, Current Work and One Project exclusion,
+  deterministic ordering). Plus mechanical fixture updates (`calendarOnly: false`) across every
+  existing test that builds a literal `Task` object, now that the field is required and non-optional.
+  58 test files / 857 tests passing (up from 56 files / 827 tests before this feature).
+- **Not done, out of scope for this session:** calendar-only tasks are still selectable in Goals'
+  linked-tasks Target picker (`TargetForm.tsx`, via the unfiltered `getActiveTasks`) and still count
+  toward a Board column's `nextSortOrder` slot — neither was in scope, both left as deliberate
+  non-changes rather than oversights.
+- **Manual browser verification:** the dev server was started for the user's own 10-point manual test
+  pass (blocked-submit message, save with date/time, appearing in Calendar, absence from Board/Tasks/
+  Today, edit-shows-selected, Complete/Reopen preserving the flag, moving back to the Board, Today
+  Copy-to-AI inclusion, Current Work/One Project exclusion, and persistence across a refresh) but the
+  session ended with the server stopped before results were reported back — **still outstanding, not
+  confirmed either way.**
+
 ## Latest test results
 
 ```
 npm run test
-Test Files  48 passed (48)
-Tests       606 passed (606)
+Test Files  58 passed (58)
+Tests       857 passed (857)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
@@ -1118,15 +1205,18 @@ landed; 400 once the post-migration feature updates above — project archiving,
 `CalendarView` — each added their own test files/cases; 424 once the optional project priority
 ranking feature added its own test coverage; 433 once the Tasks-tab triage-inbox change added its
 own test coverage; 469 once the Copy to AI feature above added its own formatter and interaction
-tests; 606 now, after the Goals and Targets data foundation and cloud-sync activation above. Verified
-directly by running `npm run test` on 2026-09-08.)
+tests; 606 after the Goals and Targets data foundation and cloud-sync activation above (2026-09-08).
+827 (56 files) immediately before the Calendar Only feature above — the growth from 606 to 827 happened
+across the undocumented intervening work noted above; this file's own record does not break it down
+further. 857 now (58 files), after the Calendar Only feature's own reducer, repository, storage, UI,
+and Copy-to-AI test coverage. Verified directly by running `npm run test` on 2026-09-17.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-BCr_B0k_.js   556.70 kB
+dist/assets/index-r_16FNKb.js   599.17 kB
 ```
 
 (Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
@@ -1149,13 +1239,18 @@ Goals and Targets cloud-sync activation above — `goalsRepository.ts`/`targetsR
 extended `hydrateFromCloud.ts`/`refreshFromCloud.ts`/`drainSync.ts`/`linkingChoice.ts` are genuinely
 reachable from the shipped entry point already, since cloud sync is live (`CloudSyncContext.tsx`/
 `SyncEngineContext.tsx`/`LinkingChoice.tsx` are all wired into `App.tsx`), even though no Goals UI
-exists yet to create the data these paths sync. Verified directly by running `npm run build` on
-2026-09-08.)
+exists yet to create the data these paths sync (2026-09-08). 597.82 kB immediately before the Calendar
+Only feature above — the growth from 556.70 kB to 597.82 kB happened across the undocumented
+intervening work noted above; this file's own record does not break it down further. Grew to 599.17 kB
+with the Calendar Only feature above — one new `Task` field, one new `TaskForm` branch, and the
+Copy-to-AI Today-scope union logic; no new dependency. Verified directly by running `npm run build` on
+2026-09-17.)
 
 ## Lint
 
 ```
-npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by the Goals and Targets work)
+npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on AppContext.tsx, AuthContext.tsx, CloudSyncContext.tsx, and SyncEngineContext.tsx — all context+provider files by design, unchanged by the Calendar Only work)
 ```
 
-(Re-verified directly by running `npm run lint` on 2026-09-08 — same 4 warnings, still 0 errors.)
+(Re-verified directly by running `npm run lint` on 2026-09-08, and again on 2026-09-17 after the
+Calendar Only feature above — same 4 warnings, still 0 errors.)

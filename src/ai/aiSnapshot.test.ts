@@ -90,7 +90,7 @@ describe('formatGeneratedAt', () => {
 describe('buildAISnapshot — header', () => {
   it('always includes the title, generated line, scope line, and instructions', () => {
     const text = buildAISnapshot([], [], [], [], [], { type: 'current-work' }, GENERATED_AT);
-    expect(text.startsWith('# Daily Compass Snapshot\n')).toBe(true);
+    expect(text.startsWith('# GSD Snapshot\n')).toBe(true);
     expect(text).toContain('Generated: September 7, 2026, 9:15 AM');
     expect(text).toContain('Scope: Current work');
     expect(text).toContain('## Instructions for my AI');

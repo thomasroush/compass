@@ -2,17 +2,17 @@ export function AboutView() {
   return (
     <div className="view">
       <header className="view-header">
-        <h1>About Daily Compass</h1>
+        <h1>About GSD</h1>
       </header>
 
       <section className="section">
         <p>
-          I created Compass to help me keep track of my day, my responsibilities, my goals, and
+          I created GSD to help me keep track of my day, my responsibilities, my goals, and
           my life. I wanted to get all the scattered lists out of my life and get more done.
         </p>
         <p>
           The app was built around two simple ideas: &ldquo;What gets measured gets done&rdquo;
-          and &ldquo;Write it down so you don&rsquo;t forget it.&rdquo; Compass has helped me
+          and &ldquo;Write it down so you don&rsquo;t forget it.&rdquo; GSD has helped me
           tremendously, and I&rsquo;m making it available here for free.
         </p>
         <p>
@@ -34,10 +34,10 @@ export function AboutView() {
         </p>
         <p>
           If you want to create a quick calendar item, enter a task and select &ldquo;Calendar
-          only.&rdquo; I put everything in Compass so I can easily scan the days and weeks ahead.
+          only.&rdquo; I put everything in GSD so I can easily scan the days and weeks ahead.
           If I see something regularly, I&rsquo;m less likely to be surprised by it.
         </p>
-        <p>Compass also has two features that reach beyond the app.</p>
+        <p>GSD also has two features that reach beyond the app.</p>
         <p>
           &ldquo;Copy to AI&rdquo; lets you copy selected Projects, Tasks, Goals, or current work
           to your clipboard and paste them into an AI assistant. My AI knows me well and can
@@ -50,11 +50,11 @@ export function AboutView() {
           can then be imported into Google Calendar, Outlook, or another compatible calendar.
         </p>
         <p>
-          The Compass workflow may not be completely intuitive at first, but you can figure it
+          The GSD workflow may not be completely intuitive at first, but you can figure it
           out. Explore the dropdown menus, and you&rsquo;ll find what you need.
         </p>
         <p>
-          Enjoy! I hope Compass helps you become more organized and productive. Please feel free
+          Enjoy! I hope GSD helps you become more organized and productive. Please feel free
           to send feedback to{' '}
           <a href="mailto:thomasroush@gmail.com">thomasroush@gmail.com</a>.
         </p>

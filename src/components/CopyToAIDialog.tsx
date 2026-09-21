@@ -138,7 +138,7 @@ export function CopyToAIDialog({ onClose }: CopyToAIDialogProps) {
             )}
 
             <p className="section-help">
-              Only the text shown here is copied. Compass does not send it anywhere.
+              Only the text shown here is copied. GSD does not send it anywhere.
             </p>
 
             {copyState === 'success' && (

@@ -58,7 +58,7 @@ export function AccountPanel() {
         <h2>Account</h2>
         <p>
           Cloud account access is unavailable because this app is not connected to Supabase.
-          Daily Compass continues to work fully in this browser using local storage.
+          GSD continues to work fully in this browser using local storage.
         </p>
       </section>
     );

@@ -80,7 +80,7 @@ describe('AuthGate — signed out (Supabase configured)', () => {
     authState.user = null;
     render(<App />);
 
-    expect(screen.getByText('Daily Compass')).toBeTruthy();
+    expect(screen.getByAltText('GSD')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /export/i })).toBeNull();
   });
 });

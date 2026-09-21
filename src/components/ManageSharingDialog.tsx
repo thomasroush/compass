@@ -180,7 +180,7 @@ export function ManageSharingDialog({ project, accountId, onClose }: ManageShari
           <section className="section">
             <h3>Invite collaborator</h3>
             <p className="section-help">
-              Compass does not send an invitation email yet. Tell this person to sign in with this exact email
+              GSD does not send an invitation email yet. Tell this person to sign in with this exact email
               address.
             </p>
             {/* noValidate: this form's own JS validation produces the

@@ -30,7 +30,7 @@ function formatTaskLine(task: Task): string {
 
 export function exportActiveTasksMarkdown(data: AppData): string {
   const active = data.tasks.filter((t) => !t.archived && t.status !== 'Done');
-  const lines: string[] = ['# Daily Compass Tasks', ''];
+  const lines: string[] = ['# GSD Tasks', ''];
 
   for (const status of TASK_STATUSES) {
     if (status === 'Done') continue;

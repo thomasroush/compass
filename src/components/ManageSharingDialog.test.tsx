@@ -75,10 +75,10 @@ describe('ManageSharingDialog — loading and layout', () => {
     expect(membersRepo.listMembers).toHaveBeenCalledWith('proj-1');
   });
 
-  it('shows the explanation that Compass sends no invitation email', () => {
+  it('shows the explanation that GSD sends no invitation email', () => {
     renderDialog();
     expect(
-      screen.getByText(/Compass does not send an invitation email yet\. Tell this person to sign in/),
+      screen.getByText(/GSD does not send an invitation email yet\. Tell this person to sign in/),
     ).toBeTruthy();
   });
 

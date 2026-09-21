@@ -37,7 +37,7 @@ export function AppShell() {
     <div className="app-shell">
       <aside className="sidebar" aria-label="Main navigation">
         <div className="brand">
-          <img src="/compass_logo.jpg" alt="Daily Compass" className="brand-logo" />
+          <img src="/gsd-logo-128.png" alt="GSD" className="brand-logo" />
         </div>
         <nav className="sidebar-nav">
           {NAV_ITEMS.map((item) => (
@@ -56,7 +56,7 @@ export function AppShell() {
       <div className="main-column">
         <header className="top-bar">
           <div className="brand mobile-brand">
-            <img src="/compass_logo.jpg" alt="Daily Compass" className="brand-logo" />
+            <img src="/gsd-logo-128.png" alt="GSD" className="brand-logo" />
           </div>
           <QuickAddTask />
           <button type="button" className="secondary" onClick={() => setQuickNoteOpen(true)}>
