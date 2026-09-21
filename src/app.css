@@ -775,12 +775,20 @@ a:focus-visible {
 
 .quick-note-input {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin: 0.75rem 0;
 }
 
 .quick-note-input input {
   flex: 1;
+}
+
+/* The counter and the limit message sit on their own line under the input. */
+.quick-note-input .char-counter,
+.quick-note-input .message {
+  flex: 0 0 100%;
+  margin: 0;
 }
 
 .quick-note-list {
@@ -856,6 +864,18 @@ a:focus-visible {
 .message.error {
   background: #fef2f2;
   border-color: #fecaca;
+  color: var(--danger);
+}
+
+/* Subtle "n / max characters" readout under a length-limited field. */
+.char-counter {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.char-counter.over-limit {
   color: var(--danger);
 }
 

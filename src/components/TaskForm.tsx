@@ -8,6 +8,15 @@ import {
   noteAuthorName,
   removeEmptyNoteHeader,
 } from '../lib/noteHeader';
+import {
+  TASK_NOTES_COUNTER_THRESHOLD,
+  TASK_NOTES_LIMIT_MESSAGE,
+  TASK_NOTES_MAX_LENGTH,
+  countCharacters,
+  exceedsLimit,
+  formatCharacterCount,
+  showCounter,
+} from '../lib/noteLimits';
 import { PRIORITIES, TASK_STATUSES, type Task, type TaskStatus } from '../types';
 
 /**
@@ -48,6 +57,18 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
   // clears itself the moment the user fixes it, without a separate effect.
   const [dueDateErrorAttempted, setDueDateErrorAttempted] = useState(false);
   const showDueDateError = dueDateErrorAttempted && calendarOnly && !dueDate;
+  // Same attempted-then-live pattern for the Notes length limit. Notes saved
+  // before the limit existed may already be longer than it; those stay
+  // editable as long as they don't grow (see exceedsLimit).
+  const [notesLimitAttempted, setNotesLimitAttempted] = useState(false);
+  const notesLength = countCharacters(notes);
+  const notesOverLimit = exceedsLimit(
+    notesLength,
+    TASK_NOTES_MAX_LENGTH,
+    countCharacters(task?.notes ?? ''),
+  );
+  const showNotesLimitError = notesLimitAttempted && notesOverLimit;
+  const showNotesCounter = showCounter(notesLength, TASK_NOTES_COUNTER_THRESHOLD);
 
   function handlePlacementChange(value: PlacementValue) {
     if (value === CALENDAR_ONLY_PLACEMENT) {
@@ -92,10 +113,12 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
     const trimmed = title.trim();
     if (!trimmed) return;
 
-    if (calendarOnly && !dueDate) {
-      setDueDateErrorAttempted(true);
-      return;
-    }
+    // Validate everything before bailing so every problem is shown at once.
+    // The typed text is left exactly as entered — nothing is ever truncated.
+    const missingDueDate = calendarOnly && !dueDate;
+    if (missingDueDate) setDueDateErrorAttempted(true);
+    if (notesOverLimit) setNotesLimitAttempted(true);
+    if (missingDueDate || notesOverLimit) return;
 
     // Calendar only is a placement/visibility flag, not a workflow status —
     // it always stores 'Inbox' as its underlying status (see
@@ -177,7 +200,17 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
               rows={3}
               value={notes}
               onChange={handleNotesChange}
+              aria-invalid={showNotesLimitError || undefined}
+              aria-describedby={showNotesCounter ? 'task-notes-counter' : undefined}
             />
+            {showNotesCounter && (
+              <p
+                id="task-notes-counter"
+                className={notesOverLimit ? 'char-counter over-limit' : 'char-counter'}
+              >
+                {formatCharacterCount(notesLength, TASK_NOTES_MAX_LENGTH)}
+              </p>
+            )}
           </div>
 
           <div className="field">
@@ -253,6 +286,12 @@ export function TaskForm({ task, onClose, initialTitle, onCreated }: TaskFormPro
           {showDueDateError && (
             <p className="message error" role="alert">
               Calendar only requires a due date.
+            </p>
+          )}
+
+          {showNotesLimitError && (
+            <p className="message error" role="alert">
+              {TASK_NOTES_LIMIT_MESSAGE}
             </p>
           )}
 

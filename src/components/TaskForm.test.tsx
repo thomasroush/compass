@@ -252,3 +252,297 @@ describe('TaskForm — Notes attribution header', () => {
     expect(notesField().value).toBe('Plain note');
   });
 });
+
+describe('TaskForm — Notes length limit', () => {
+  const LIMIT_MESSAGE =
+    'Task notes are limited to 25,000 characters. Consider splitting longer material into multiple tasks.';
+
+  beforeEach(() => {
+    // Signed out, so typing never prepends an attribution header and the
+    // lengths below are exactly what was entered.
+    authState.user = null;
+  });
+
+  function notesField() {
+    return screen.getByLabelText('Notes') as HTMLTextAreaElement;
+  }
+  function setNotes(value: string) {
+    fireEvent.change(notesField(), { target: { value } });
+  }
+  function counter() {
+    return document.getElementById('task-notes-counter');
+  }
+  function fillTitleAndAdd() {
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Long note' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+  }
+  function savedNotes(): string | undefined {
+    return (mocks.appState.dispatch.mock.calls[0][0] as { notes?: string }).notes;
+  }
+
+  describe('saving new tasks', () => {
+    it('saves notes below the limit (24,999 characters)', () => {
+      const onClose = vi.fn();
+      render(<TaskForm onClose={onClose} />);
+
+      setNotes('x'.repeat(24999));
+      fillTitleAndAdd();
+
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(savedNotes()).toHaveLength(24999);
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it('saves notes exactly at the limit (25,000 characters)', () => {
+      const onClose = vi.fn();
+      render(<TaskForm onClose={onClose} />);
+
+      setNotes('x'.repeat(25000));
+      fillTitleAndAdd();
+
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(savedNotes()).toHaveLength(25000);
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it('refuses notes above the limit (25,001 characters): no save, no close, message shown', () => {
+      const onClose = vi.fn();
+      render(<TaskForm onClose={onClose} />);
+
+      setNotes('x'.repeat(25001));
+      fillTitleAndAdd();
+
+      expect(screen.getByRole('alert').textContent).toBe(LIMIT_MESSAGE);
+      expect(mocks.appState.dispatch).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('counts characters rather than UTF-16 units, matching the database (25,000 emoji are accepted)', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      setNotes('\u{1F600}'.repeat(25000));
+      fillTitleAndAdd();
+
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(mocks.appState.dispatch).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows no message before a save is attempted, even when over the limit', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      setNotes('x'.repeat(25001));
+
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('does not use the maxlength attribute, which would truncate silently', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      expect(notesField().hasAttribute('maxlength')).toBe(false);
+    });
+  });
+
+  describe('character counter', () => {
+    it('is hidden below 20,000 characters', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      expect(counter()).toBeNull();
+      setNotes('x'.repeat(19999));
+
+      expect(counter()).toBeNull();
+      expect(screen.queryByText(/characters$/)).toBeNull();
+    });
+
+    it('appears at exactly 20,000 characters', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      setNotes('x'.repeat(20000));
+
+      expect(counter()?.textContent).toBe('20,000 / 25,000 characters');
+    });
+
+    it('shows the running length with thousands separators', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      setNotes('x'.repeat(20145));
+
+      expect(counter()?.textContent).toBe('20,145 / 25,000 characters');
+    });
+
+    it('stays visible and is marked when over the limit', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      setNotes('x'.repeat(25001));
+
+      expect(counter()?.textContent).toBe('25,001 / 25,000 characters');
+      expect(counter()?.classList.contains('over-limit')).toBe(true);
+    });
+
+    it('disappears again when the text is shortened below 20,000', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      setNotes('x'.repeat(20500));
+      expect(counter()).not.toBeNull();
+      setNotes('x'.repeat(100));
+
+      expect(counter()).toBeNull();
+    });
+
+    it('is linked to the field for assistive technology only while shown', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      expect(notesField().hasAttribute('aria-describedby')).toBe(false);
+      setNotes('x'.repeat(20000));
+
+      expect(notesField().getAttribute('aria-describedby')).toBe('task-notes-counter');
+    });
+  });
+
+  describe('pasting oversized text', () => {
+    function paste(value: string) {
+      // A paste is the clipboard event followed by the field's change event;
+      // the form must accept the whole value at that point.
+      fireEvent.paste(notesField(), { clipboardData: { getData: () => value } });
+      setNotes(value);
+    }
+
+    it('keeps every pasted character — nothing is truncated', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+      const pasted = 'ab'.repeat(20000);
+
+      paste(pasted);
+
+      expect(notesField().value).toBe(pasted);
+      expect(counter()?.textContent).toBe('40,000 / 25,000 characters');
+    });
+
+    it('refuses to save the pasted text, keeps it, and explains why', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+      const pasted = 'ab'.repeat(20000);
+
+      paste(pasted);
+      fillTitleAndAdd();
+
+      expect(screen.getByRole('alert').textContent).toBe(LIMIT_MESSAGE);
+      expect(mocks.appState.dispatch).not.toHaveBeenCalled();
+      expect(notesField().value).toBe(pasted);
+      expect(
+        (screen.getByLabelText('Title') as HTMLInputElement).value,
+      ).toBe('Long note');
+    });
+
+    it('clears the message once the text is shortened, and then saves', () => {
+      render(<TaskForm onClose={vi.fn()} />);
+
+      paste('x'.repeat(30000));
+      fillTitleAndAdd();
+      expect(screen.getByRole('alert')).toBeTruthy();
+
+      setNotes('x'.repeat(25000));
+      expect(screen.queryByRole('alert')).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+      expect(savedNotes()).toHaveLength(25000);
+    });
+  });
+
+  describe('editing a task', () => {
+    it('enforces the limit when editing a task that was within it', () => {
+      const task = createTaskForTest({ id: 't1', title: 'Quote', notes: 'x'.repeat(100) });
+      const onClose = vi.fn();
+      render(<TaskForm task={task} onClose={onClose} />);
+
+      setNotes('x'.repeat(25001));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(screen.getByRole('alert').textContent).toBe(LIMIT_MESSAGE);
+      expect(mocks.appState.dispatch).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(notesField().value).toHaveLength(25001);
+    });
+
+    describe('with notes already over the limit (saved before it existed)', () => {
+      const OVERSIZED = `${'y'.repeat(29999)}Z`; // 30,000 characters, distinctive last one
+
+      function renderOversized(onClose = vi.fn()) {
+        const task = createTaskForTest({ id: 't1', title: 'Quote', notes: OVERSIZED });
+        render(<TaskForm task={task} onClose={onClose} />);
+        return onClose;
+      }
+      function savedUpdates() {
+        return (
+          mocks.appState.dispatch.mock.calls[0][0] as {
+            updates: { notes?: string; title?: string };
+          }
+        ).updates;
+      }
+
+      it('loads the full text into the field and shows the counter', () => {
+        renderOversized();
+
+        expect(notesField().value).toBe(OVERSIZED);
+        expect(counter()?.textContent).toBe('30,000 / 25,000 characters');
+      });
+
+      it('shows no error just from opening it', () => {
+        renderOversized();
+
+        expect(screen.queryByRole('alert')).toBeNull();
+      });
+
+      it('can be saved unchanged (for example after editing only the title) without losing any content', () => {
+        const onClose = renderOversized();
+
+        fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Quote v2' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(savedUpdates().title).toBe('Quote v2');
+        expect(savedUpdates().notes).toBe(OVERSIZED);
+        expect(onClose).toHaveBeenCalled();
+      });
+
+      it('can be shortened, even if the result is still over the limit', () => {
+        renderOversized();
+        const shorter = OVERSIZED.slice(0, 27000);
+
+        setNotes(shorter);
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(savedUpdates().notes).toBe(shorter);
+      });
+
+      it('can be shortened to within the limit', () => {
+        renderOversized();
+
+        setNotes('y'.repeat(25000));
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+        expect(savedUpdates().notes).toHaveLength(25000);
+      });
+
+      it('cannot be made longer: the save is refused and the text is kept', () => {
+        const onClose = renderOversized();
+        const longer = `${OVERSIZED}!`;
+
+        setNotes(longer);
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+        expect(screen.getByRole('alert').textContent).toBe(LIMIT_MESSAGE);
+        expect(mocks.appState.dispatch).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(notesField().value).toBe(longer);
+      });
+
+      it('leaves the stored text intact when the dialog is cancelled', () => {
+        const onClose = renderOversized();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+        expect(mocks.appState.dispatch).not.toHaveBeenCalled();
+        expect(onClose).toHaveBeenCalled();
+      });
+    });
+  });
+});
