@@ -1,8 +1,8 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
+import { LandingPage } from './components/LandingPage';
 import { LinkingChoice } from './components/LinkingChoice';
 import { LoadingScreen } from './components/LoadingScreen';
-import { LoginScreen } from './components/LoginScreen';
 import { AppProvider } from './store/AppContext';
 import { AuthProvider } from './store/AuthContext';
 import { CloudSyncProvider } from './store/CloudSyncContext';
@@ -21,13 +21,14 @@ import { TodayView } from './views/TodayView';
 import './app.css';
 
 /**
- * Login-first gate (Part 2). Deliberately scoped to `isSupabaseConfigured`:
- * AGENTS.md's "Supabase is never required to start, load, or save data"
- * rule still holds for a deployment with no Supabase project configured —
- * there is nothing to sign in to, so the app opens straight to local-only
- * use exactly as before. When Supabase *is* configured, a real account
- * exists to protect, so a signed-out visitor sees only the login screen —
- * never the nav, views, or any project/task/note content.
+ * Login-first gate (Part 2), fronted by the public landing page (Part 3).
+ * Deliberately scoped to `isSupabaseConfigured`: AGENTS.md's "Supabase is
+ * never required to start, load, or save data" rule still holds for a
+ * deployment with no Supabase project configured — there is nothing to sign
+ * in to, so the app opens straight to local-only use exactly as before. When
+ * Supabase *is* configured, a real account exists to protect, so a
+ * signed-out visitor sees only the public landing page — never the nav,
+ * views, or any project/task/note content.
  */
 function AuthGate() {
   const auth = useAuth();
@@ -35,7 +36,7 @@ function AuthGate() {
 
   if (auth.isSupabaseConfigured) {
     if (auth.status === 'loading') return <LoadingScreen />;
-    if (!auth.user) return <LoginScreen />;
+    if (!auth.user) return <LandingPage />;
     // Blocks the rest of the app until this device's relationship to the
     // account's data is explicitly resolved — see LinkingChoice.tsx.
     if (cloudSync.status === 'needs-choice') return <LinkingChoice />;

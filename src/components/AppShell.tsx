@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import { useAuth } from '../store/useAuth';
 import { CloudSyncBanner } from './CloudSyncBanner';
 import { CopyToAIDialog } from './CopyToAIDialog';
 import { MobileNav } from './MobileNav';
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
 
 export function AppShell() {
   const location = useLocation();
+  const auth = useAuth();
   const [copyToAIOpen, setCopyToAIOpen] = useState(false);
   const [quickNoteOpen, setQuickNoteOpen] = useState(false);
 
@@ -65,6 +67,11 @@ export function AppShell() {
           <button type="button" className="secondary" onClick={() => setCopyToAIOpen(true)}>
             Copy to AI
           </button>
+          {auth.isSupabaseConfigured && auth.user && (
+            <button type="button" className="secondary" onClick={() => void auth.signOut()}>
+              Log out
+            </button>
+          )}
         </header>
 
         <main className="main-content">

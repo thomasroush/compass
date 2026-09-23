@@ -1189,12 +1189,68 @@ from the Calendar keep working unchanged), and `calendarOnly` is the sole thing 
   session ended with the server stopped before results were reported back — **still outstanding, not
   confirmed either way.**
 
+### Public landing page (2026-09-22)
+
+- **Goal:** give `getshitdone.win` an actual marketing home page instead of opening straight to a
+  bare sign-in form, while leaving the existing login-first architecture (`AuthGate` in
+  `src/App.tsx`), Supabase auth flows, and post-login app untouched.
+- **New `src/components/LandingPage.tsx`** replaces the old `src/components/LoginScreen.tsx`
+  (deleted) as what `AuthGate` renders at every URL whenever Supabase is configured and nobody is
+  signed in. It renders the GSD logo and header "Log in"/"Create account" buttons, the requested
+  marketing copy (hero heading and lead paragraph, a features paragraph, a closing paragraph), and
+  the existing `AccountPanel` embedded below — unchanged sign-in/sign-up/forgot-password behavior,
+  validation, and error/success messages. Still renders nothing else: no nav, no project/task/note
+  content.
+- **Tabs via remount, not new state plumbing:** `AccountPanel` gained an optional `initialMode`
+  prop (default `'signIn'`, the same default its internal `useState` already had, so
+  `AccountPanel.test.tsx`'s no-props usage is unaffected). `LandingPage` keys the panel on its own
+  `authMode` state (`<AccountPanel key={authMode} initialMode={authMode} />`); clicking the header
+  or hero "Log in"/"Create account" buttons sets that state and remounts the panel into the right
+  tab, then smooth-scrolls it into view (`scrollIntoView` call is guarded with a `typeof` check
+  since jsdom doesn't implement it — avoids a test-only crash without mocking it).
+- **Log out control** (separate from the landing page, but part of the same request): `AppShell.tsx`
+  now renders a "Log out" button in the shared top bar — the same header present on every
+  authenticated route, desktop and mobile alike — visible only when
+  `auth.isSupabaseConfigured && auth.user`. It calls the existing `auth.signOut()` directly; no new
+  sign-out logic. Signing out already flips `AuthGate` back to `LandingPage` on its own once
+  `auth.user` goes `null`, so no extra redirect code was needed.
+- **Untouched:** `PasswordRecoveryDialog` (still lives in `AppShell`, still reached the same way —
+  a recovery-token sign-in briefly authenticates the user, which is what puts them past `AuthGate`
+  and into the dialog), the six-route app tree, `LinkingChoice`, and every cloud-sync/local-storage
+  behavior. `index.html`'s existing social-preview metadata (og:image etc.) was left as-is per
+  request — it already points at the wide `gsd-social-preview.png` banner, which is deliberately
+  *not* reused as the on-page hero image; the page uses the small `/gsd-logo-128.png` mark instead,
+  same asset every other screen already uses.
+- Tests: `src/App.test.tsx` extended — the old single "restrained login screen" assertion was
+  replaced with coverage for the marketing copy being present, both CTA buttons being present near
+  the top, clicking them switching the embedded panel's tab, a Log out button being present from any
+  route once signed in and calling `auth.signOut()` on click, and Log out never appearing when
+  Supabase isn't configured. The existing "never renders nav content while signed out" test was
+  rewritten to assert on nav links/landmarks specifically (`getByRole('link'/'complementary')`)
+  rather than plain text, since the new marketing copy legitimately contains words like "Projects"
+  and "Calendar" in prose. 63 test files / 961 tests passing — no new test file needed;
+  `App.test.tsx` alone grew from 10 to 14 tests, and `AccountPanel.tsx`'s new optional prop needed
+  no test changes since `AccountPanel.test.tsx`'s existing no-props coverage already exercises the
+  unchanged default.
+- **Manual verification:** ran the app in a real browser via `npm run dev` against the actual
+  configured Supabase project. Confirmed the landing page renders with the requested copy and both
+  CTA buttons, and that clicking "Create account" smooth-scrolls to and switches the embedded panel
+  into sign-up mode with a clean (non-autofilled) form. Did **not** click the sign-in submit button
+  or otherwise complete an actual sign-in — Chrome had autofilled the account's real saved
+  credentials into the sign-in fields, and submitting would have created a real session change on a
+  live account, so the authenticated view (app shell nav + Log out button placement) was verified
+  through the automated test suite above instead of a live sign-in. Mobile-width layout was checked
+  by CSS review (the landing header/hero/CTA rules use the same `flex-wrap`/no-fixed-width approach
+  as the app's existing, already-tested 768px breakpoint) rather than a live narrow-viewport
+  screenshot — an attempted browser window resize during this session did not actually change the
+  rendered viewport, so that specific check is unconfirmed by direct observation.
+
 ## Latest test results
 
 ```
 npm run test
-Test Files  58 passed (58)
-Tests       857 passed (857)
+Test Files  63 passed (63)
+Tests       961 passed (961)
 ```
 
 (185 passed as of commit `c2ec2a7`; 197 after Phase 5B3A task 2's first slice — `create*`/
@@ -1215,15 +1271,20 @@ own test coverage; 469 once the Copy to AI feature above added its own formatter
 tests; 606 after the Goals and Targets data foundation and cloud-sync activation above (2026-09-08).
 827 (56 files) immediately before the Calendar Only feature above — the growth from 606 to 827 happened
 across the undocumented intervening work noted above; this file's own record does not break it down
-further. 857 now (58 files), after the Calendar Only feature's own reducer, repository, storage, UI,
-and Copy-to-AI test coverage. Verified directly by running `npm run test` on 2026-09-17.)
+further. 857 (58 files) after the Calendar Only feature's own reducer, repository, storage, UI,
+and Copy-to-AI test coverage. 957 (63 files) immediately before the Public landing page feature
+above — the growth from 857 to 957 happened across undocumented intervening work (note length
+limits, Board/Calendar Archive-vs-Complete change, desktop nav icons, GSD rebranding) between
+2026-09-17 and this session; this file's own record does not break it down further. 961 now (still
+63 files), after the Public landing page feature above grew `App.test.tsx` from 10 to 14 tests.
+Verified directly by running `npm run test` on 2026-09-22.)
 
 ## Latest build results
 
 ```
 npm run build
 tsc -b && vite build — success
-dist/assets/index-r_16FNKb.js   599.17 kB
+dist/assets/index-CdhWKUVg.js   605.35 kB
 ```
 
 (Grew from 514.42 kB to 523.69 kB with 5B3B's initial implementation — expected, since
@@ -1250,8 +1311,11 @@ exists yet to create the data these paths sync (2026-09-08). 597.82 kB immediate
 Only feature above — the growth from 556.70 kB to 597.82 kB happened across the undocumented
 intervening work noted above; this file's own record does not break it down further. Grew to 599.17 kB
 with the Calendar Only feature above — one new `Task` field, one new `TaskForm` branch, and the
-Copy-to-AI Today-scope union logic; no new dependency. Verified directly by running `npm run build` on
-2026-09-17.)
+Copy-to-AI Today-scope union logic; no new dependency. 599.17 kB was still current immediately
+before the Public landing page feature above — this file's record has no entry for the undocumented
+intervening work between 2026-09-17 and this session. Grew to 605.35 kB with the Public landing
+page feature above — one new `src/components/LandingPage.tsx` (replacing the deleted
+`LoginScreen.tsx`), no new dependency. Verified directly by running `npm run build` on 2026-09-22.)
 
 ## Lint
 
@@ -1260,4 +1324,5 @@ npm run lint — 0 errors (4 warnings: react-refresh/only-export-components on A
 ```
 
 (Re-verified directly by running `npm run lint` on 2026-09-08, and again on 2026-09-17 after the
-Calendar Only feature above — same 4 warnings, still 0 errors.)
+Calendar Only feature above — same 4 warnings, still 0 errors. Re-verified again on 2026-09-22 after
+the Public landing page feature above — same 4 pre-existing warnings, still 0 errors.)

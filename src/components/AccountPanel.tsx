@@ -9,9 +9,16 @@ const MODE_COPY: Record<Mode, { heading: string; submit: string }> = {
   forgot: { heading: 'Reset your password', submit: 'Send reset link' },
 };
 
-export function AccountPanel() {
+interface AccountPanelProps {
+  /** Starting tab. Callers that need to switch tabs after mount (e.g. the
+   * landing page's "Log in" / "Create account" buttons) remount with a new
+   * `key` rather than pushing updates into this uncontrolled component. */
+  initialMode?: Mode;
+}
+
+export function AccountPanel({ initialMode = 'signIn' }: AccountPanelProps = {}) {
   const auth = useAuth();
-  const [mode, setMode] = useState<Mode>('signIn');
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');

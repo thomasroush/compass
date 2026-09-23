@@ -17,6 +17,7 @@ const authState = vi.hoisted(() => ({
   isSupabaseConfigured: true,
   status: 'ready' as 'loading' | 'ready',
   user: null as { id: string; email: string } | null,
+  signOut: vi.fn(),
 }));
 const cloudSyncState = vi.hoisted(() => ({
   status: 'idle' as string,
@@ -68,20 +69,51 @@ describe('AuthGate — signed out (Supabase configured)', () => {
     authState.user = null;
     render(<App />);
 
-    expect(screen.queryByText('Today')).toBeNull();
-    expect(screen.queryByText('Board')).toBeNull();
-    expect(screen.queryByText('Projects')).toBeNull();
-    expect(screen.queryByText('Calendar')).toBeNull();
-    expect(screen.queryByText('Settings')).toBeNull();
+    // The landing page's marketing copy legitimately mentions feature names
+    // like "Projects" and "Calendar" in prose, so assert on the actual nav
+    // affordances (links/headings), not on plain text matches.
+    expect(screen.queryByRole('link', { name: 'Today' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Board' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Projects' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Calendar' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Settings' })).toBeNull();
+    expect(screen.queryByRole('complementary', { name: 'Main navigation' })).toBeNull();
   });
 
-  it('has a restrained login screen: no nav chrome, just the brand and the account form', () => {
+  it('shows the public landing page: brand, marketing copy, and no app chrome', () => {
     authState.status = 'ready';
     authState.user = null;
     render(<App />);
 
     expect(screen.getByAltText('GSD')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'GSD (Get S$$T Done)' })).toBeTruthy();
+    expect(screen.getByText(/brings your goals, projects, tasks/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /export/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Log out' })).toBeNull();
+  });
+
+  it('puts Log in and Create account calls to action near the top', () => {
+    authState.status = 'ready';
+    authState.user = null;
+    render(<App />);
+
+    expect(screen.getAllByRole('button', { name: 'Log in' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Create account' }).length).toBeGreaterThan(0);
+  });
+
+  it('the top Log in / Create account buttons switch the embedded account form', () => {
+    authState.status = 'ready';
+    authState.user = null;
+    render(<App />);
+
+    // Sign-in is the default tab.
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create account' })[0]);
+    expect(screen.getByRole('heading', { name: 'Create an account' })).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Log in' })[0]);
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeTruthy();
   });
 });
 
@@ -157,7 +189,7 @@ describe('AuthGate — signed in (Supabase configured)', () => {
     expect(screen.queryByText('Primary tasks')).toBeNull();
   });
 
-  it('returns to the login screen immediately after sign-out', () => {
+  it('returns to the landing page immediately after sign-out', () => {
     authState.status = 'ready';
     authState.user = { id: 'user-1', email: 'person@example.com' };
     const { rerender } = render(<App />);
@@ -166,8 +198,23 @@ describe('AuthGate — signed in (Supabase configured)', () => {
     authState.user = null;
     rerender(<App />);
 
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Today' })).toBeNull();
+  });
+
+  it('shows a Log out control in the top bar from every page, and it calls the existing sign-out logic', () => {
+    authState.status = 'ready';
+    authState.user = { id: 'user-1', email: 'person@example.com' };
+    cloudSyncState.status = 'idle';
+    render(<App />);
+
+    expect(screen.getByRole('button', { name: 'Log out' })).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole('link', { name: 'Calendar' })[0]);
+    expect(screen.getByRole('button', { name: 'Log out' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+    expect(authState.signOut).toHaveBeenCalled();
   });
 });
 
@@ -180,5 +227,14 @@ describe('AuthGate — Supabase not configured', () => {
 
     expect(screen.getAllByRole('link', { name: 'Today' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+  });
+
+  it('never shows a Log out control when Supabase is not configured (nothing to sign out of)', () => {
+    authState.isSupabaseConfigured = false;
+    authState.status = 'ready';
+    authState.user = null;
+    render(<App />);
+
+    expect(screen.queryByRole('button', { name: 'Log out' })).toBeNull();
   });
 });
